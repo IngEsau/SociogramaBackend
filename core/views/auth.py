@@ -5,7 +5,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from core.models import User, Alumno, Docente  # ✅ CAMBIO: Importar User de core.models
+from core.models import User, Alumno, Docente
 from ..serializers import (
     LoginSerializer, RegisterSerializer, UserSerializer, AlumnoSerializer
 )
@@ -21,19 +21,19 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         data = super().validate(attrs)
         
-        # ✅ CAMBIO: Agregar información del User extendido
+        # Agregar información del User extendido
         data['user'] = {
             'id': self.user.id,
             'username': self.user.username,
             'email': self.user.email,
-            'nombre_completo': self.user.nombre_completo or self.user.get_full_name(),  # ✅ Campo directo
-            'rol': self.user.rol,  # ✅ Campo directo
-            'genero': self.user.genero,  # ✅ Campo directo
+            'nombre_completo': self.user.nombre_completo or self.user.get_full_name(), 
+            'rol': self.user.rol,  
+            'genero': self.user.genero,  
             'is_staff': self.user.is_staff,
         }
         
         # Si es alumno, agregar info del alumno
-        if self.user.rol == 'ALUMNO':  # ✅ Usar campo rol
+        if self.user.rol == 'ALUMNO':  
             try:
                 alumno = Alumno.objects.get(user=self.user)
                 data['user']['alumno'] = {
@@ -81,8 +81,8 @@ def login_view(request):
         
         # Generar tokens JWT
         refresh = RefreshToken.for_user(user)
-        
-        # ✅ CAMBIO: Preparar respuesta con campos del User extendido
+
+        # Preparar respuesta con campos del User extendido
         response_data = {
             'access': str(refresh.access_token),
             'refresh': str(refresh),
@@ -90,16 +90,16 @@ def login_view(request):
                 'id': user.id,
                 'username': user.username,
                 'email': user.email,
-                'nombre_completo': user.nombre_completo or user.get_full_name(),  # ✅ Campo directo
+                'nombre_completo': user.nombre_completo or user.get_full_name(),  # Campo directo
                 'first_name': user.first_name,
                 'last_name': user.last_name,
-                'rol': user.rol,  # ✅ Campo directo
-                'genero': user.genero,  # ✅ Campo directo
+                'rol': user.rol,  # Campo directo
+                'genero': user.genero,  # Campo directo
                 'is_staff': user.is_staff,
             }
         }
-        
-        # ✅ CAMBIO: Usar el campo rol para determinar el tipo de usuario
+
+        # CAMBIO: Usar el campo rol para determinar el tipo de usuario
         if user.rol == 'ALUMNO':
             try:
                 alumno = Alumno.objects.select_related('plan_estudio__programa').get(user=user)
@@ -218,10 +218,10 @@ def me_view(request):
     user = request.user
     response_data = {
         'user': UserSerializer(user).data,
-        'rol': user.rol  # ✅ Campo directo
+        'rol': user.rol  # Campo directo
     }
-    
-    # ✅ CAMBIO: Usar el campo rol para determinar el tipo de usuario
+
+    # CAMBIO: Usar el campo rol para determinar el tipo de usuario
     if user.rol == 'ALUMNO':
         try:
             alumno = Alumno.objects.select_related(
