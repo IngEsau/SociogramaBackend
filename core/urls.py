@@ -8,6 +8,10 @@ from .views import (
     me_view, change_password_view, verify_token_view,
     CustomTokenObtainPairView,
     import_csv_view,
+    import_docentes_view,
+    import_alumnos_view,
+    asignar_tutor_view,
+    remover_tutor_view,
     my_groups_view
 )
 
@@ -30,9 +34,16 @@ urlpatterns = [
     
 
     # ========================================
-    # ADMINISTRACIÓN
+    # ADMINISTRACIÓN - IMPORTACIONES
     # ========================================
     path('admin/import-csv/', import_csv_view, name='import-csv'),
+    path('admin/import-grupos-completos/', import_csv_view, name='import-grupos-completos'),  # Alias más claro
+    path('admin/import-docentes/', import_docentes_view, name='import-docentes'),
+    path('admin/import-alumnos/', import_alumnos_view, name='import-alumnos'),
+    
+    # ADMINISTRACIÓN - GESTIÓN
+    path('admin/asignar-tutor/', asignar_tutor_view, name='asignar-tutor'),
+    path('admin/remover-tutor/', remover_tutor_view, name='remover-tutor'),
 
 
     # ========================================
