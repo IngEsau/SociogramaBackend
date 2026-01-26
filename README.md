@@ -120,7 +120,10 @@ sociograma_project/
 │   │   └── admin/                # Views de administración
 │   │       ├── __init__.py       # Exporta endpoints admin
 │   │       ├── helpers.py        # Funciones auxiliares
-│   │       └── import_csv.py     # Importación CSV
+│   │       ├── import_csv.py     # Importación CSV
+│   │       ├── asignar_tutor.py     # Asignar Tutores
+│   │       ├── asignar_docentes.py     # Asignar Docentes CSV
+│   │       └── asignar_alumnos.py     # Asignar Alumnos CSV
 │   │
 │   ├── serializers/
 │   │   ├── alumno.py

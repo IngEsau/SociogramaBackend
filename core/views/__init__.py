@@ -18,15 +18,18 @@ from .auth import (
 # Views de administración
 from .admin import (
     import_csv_view,
+    import_docentes_view,
+    import_alumnos_view,
+    asignar_tutor_view,
+    remover_tutor_view,
 )
 
-# Views académicas (si existen)
+# Views académicas
 try:
     from .academic import (
         my_groups_view,
     )
 except ImportError:
-    # Si no existe el archivo academic.py todavía
     my_groups_view = None
 
 __all__ = [
@@ -41,6 +44,10 @@ __all__ = [
     
     # Administración
     'import_csv_view',
+    'import_docentes_view',
+    'import_alumnos_view',
+    'asignar_tutor_view',
+    'remover_tutor_view',
     
     # Académico
     'my_groups_view',
