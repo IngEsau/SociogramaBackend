@@ -96,6 +96,32 @@ JWT_REFRESH_TOKEN_LIFETIME=7
 ```
 sociograma_project/
 ├── core/
+│   ├── models/                    # Modelos organizados en módulos
+│   │   ├── __init__.py           # Exporta todos los modelos
+│   │   ├── base.py               # User extendido
+│   │   ├── academic.py           # División, Programa, PlanEstudio, Periodo
+│   │   ├── people.py             # Docente, Alumno
+│   │   ├── groups.py             # Grupo, AlumnoGrupo
+│   │   ├── surveys.py            # Pregunta, Opcion, Respuesta
+│   │   └── reports.py            # Reporte
+│   │
+│   ├── admin/                     # Admin organizado en módulos
+│   │   ├── __init__.py           # Exporta todos los admins
+│   │   ├── base.py               # UserAdmin
+│   │   ├── academic.py           # Admins de catálogos académicos
+│   │   ├── people.py             # DocenteAdmin, AlumnoAdmin
+│   │   ├── groups.py             # GrupoAdmin, AlumnoGrupoAdmin
+│   │   └── surveys.py            # Admins de encuestas y reportes
+│   │
+│   ├── views/                     # Views organizadas
+│   │   ├── __init__.py           # Exporta todas las views
+│   │   ├── auth.py               # Endpoints de autenticación
+│   │   ├── academic.py           # Endpoints académicos (tutores)
+│   │   └── admin/                # Views de administración
+│   │       ├── __init__.py       # Exporta endpoints admin
+│   │       ├── helpers.py        # Funciones auxiliares
+│   │       └── import_csv.py     # Importación CSV
+│   │
 │   ├── serializers/
 │   │   ├── alumno.py
 │   │   ├── auth.py
@@ -104,29 +130,27 @@ sociograma_project/
 │   │   ├── grupo.py
 │   │   ├── pregunta.py
 │   │   └── __init__.py
+│   │
 │   ├── utils/
 │   │   ├── auth.py
 │   │   ├── decorators.py
 │   │   ├── validators.py
 │   │   └── __init__.py
-│   ├── views/
-│   │   ├── academic.py
-│   │   ├── admin.py
-│   │   ├── auth.py
-│   │   └── __init__.py
-│   ├── admin.py
+│   │
 │   ├── apps.py
-│   ├── models.py
 │   ├── pagination.py
 │   ├── permissions.py
 │   └── urls.py
+│
 ├── logs/
 │   └── django.log
+│
 ├── sociograma_project/
 │   ├── asgi.py
 │   ├── settings.py
 │   ├── urls.py
 │   └── wsgi.py
+│
 ├── .env
 ├── .gitignore
 ├── datos.xlsx
@@ -358,4 +382,4 @@ python manage.py test
 
 Proyecto académico - Universidad Tecnológica de Puebla
 
-**Última actualización:** 01/19/2026
+**Última actualización:** 01/26/2026
