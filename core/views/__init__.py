@@ -1,4 +1,10 @@
 # core/views/__init__.py
+"""
+Views del Sistema Sociograma UTP
+Exporta todos los endpoints de la aplicación
+"""
+
+# Views de autenticación
 from .auth import (
     login_view,
     logout_view,
@@ -6,13 +12,25 @@ from .auth import (
     me_view,
     change_password_view,
     verify_token_view,
-    CustomTokenObtainPairView
+    CustomTokenObtainPairView,
 )
-from .admin import import_csv_view
-from .academic import my_groups_view
+
+# Views de administración
+from .admin import (
+    import_csv_view,
+)
+
+# Views académicas (si existen)
+try:
+    from .academic import (
+        my_groups_view,
+    )
+except ImportError:
+    # Si no existe el archivo academic.py todavía
+    my_groups_view = None
 
 __all__ = [
-    # Auth
+    # Autenticación
     'login_view',
     'logout_view',
     'register_view',
@@ -21,9 +39,9 @@ __all__ = [
     'verify_token_view',
     'CustomTokenObtainPairView',
     
-    # Admin
+    # Administración
     'import_csv_view',
     
-    # Academic
+    # Académico
     'my_groups_view',
 ]

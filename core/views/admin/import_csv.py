@@ -1,5 +1,7 @@
-# core/views/admin.py
-
+# core/views/admin/import_csv.py
+"""
+Endpoint de importación masiva desde CSV
+"""
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.response import Response
@@ -15,41 +17,12 @@ from core.models import (
     Docente, Grupo, Alumno, AlumnoGrupo
 )
 from core.utils.decorators import require_admin
-
-
-# =============================================================================
-# FUNCIONES AUXILIARES
-# =============================================================================
-
-def limpiar_texto(texto):
-    if pd.isna(texto) or texto == '':
-        return None
-    return str(texto).strip()
-
-def generar_username(matricula_o_empleado):
-    return str(matricula_o_empleado).strip().lower().replace(' ', '')
-
-def normalizar_genero(sexo):
-    if not sexo:
-        return None
-    sexo_lower = str(sexo).lower()
-    if 'h' in sexo_lower or 'm' == sexo_lower or 'masc' in sexo_lower:
-        return 'Masculino'
-    elif 'f' in sexo_lower or 'mujer' in sexo_lower or 'fem' in sexo_lower:
-        return 'Femenino'
-    return 'Otro'
-
-def crear_o_obtener_periodo():
-    periodo, created = Periodo.objects.get_or_create(
-        codigo='2025-2',
-        defaults={
-            'nombre': 'Mayo - Agosto 2025',
-            'fecha_inicio': date(2025, 5, 1),
-            'fecha_fin': date(2025, 8, 31),
-            'activo': True
-        }
-    )
-    return periodo
+from .helpers import (
+    limpiar_texto,
+    generar_username,
+    normalizar_genero,
+    crear_o_obtener_periodo,
+)
 
 
 # =============================================================================
