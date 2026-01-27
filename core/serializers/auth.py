@@ -77,3 +77,50 @@ class RegisterSerializer(serializers.ModelSerializer):
         user.save()
         
         return user
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """Serializador para solicitar reset de contraseña"""
+    email = serializers.EmailField(required=True)
+    
+    def validate_email(self, value):
+        """Validar que el email exista en el sistema"""
+        try:
+            User.objects.get(email=value, is_active=True)
+        except User.DoesNotExist:
+            # Por seguridad, no revelamos si el email existe o no
+            # pero internamente validamos
+            pass
+        return value
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """Serializador para confirmar reset de contraseña"""
+    token = serializers.CharField(required=True)
+    new_password = serializers.CharField(
+        required=True, 
+        write_only=True,
+        min_length=8,
+        style={'input_type': 'password'}
+    )
+    new_password2 = serializers.CharField(
+        required=True,
+        write_only=True,
+        label='Confirmar Password',
+        style={'input_type': 'password'}
+    )
+    
+    def validate(self, data):
+        """Validar que las contraseñas coincidan"""
+        if data['new_password'] != data['new_password2']:
+            raise serializers.ValidationError({
+                'new_password2': 'Las contraseñas no coinciden'
+            })
+        
+        # Validar longitud mínima
+        if len(data['new_password']) < 8:
+            raise serializers.ValidationError({
+                'new_password': 'La contraseña debe tener al menos 8 caracteres'
+            })
+        
+        return data

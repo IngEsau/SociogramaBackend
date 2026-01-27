@@ -7,6 +7,7 @@ from .views import (
     login_view, logout_view, register_view,
     me_view, change_password_view, verify_token_view,
     CustomTokenObtainPairView,
+    password_reset_request_view, password_reset_validate_view, password_reset_confirm_view,
     import_csv_view,
     import_docentes_view,
     import_alumnos_view,
@@ -31,6 +32,11 @@ urlpatterns = [
     path('auth/verify-token/', verify_token_view, name='verify-token'),
     path('auth/token/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    
+    # Password Reset
+    path('auth/password-reset/request/', password_reset_request_view, name='password-reset-request'),
+    path('auth/password-reset/validate/', password_reset_validate_view, name='password-reset-validate'),
+    path('auth/password-reset/confirm/', password_reset_confirm_view, name='password-reset-confirm'),
     
 
     # ========================================
