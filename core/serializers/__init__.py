@@ -2,7 +2,9 @@
 from .auth import (
     UserSerializer,
     LoginSerializer,
-    RegisterSerializer
+    RegisterSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetConfirmSerializer
 )
 
 # Serializers de modelos principales
@@ -43,6 +45,8 @@ __all__ = [
     'UserSerializer',
     'LoginSerializer',
     'RegisterSerializer',
+    'PasswordResetRequestSerializer',
+    'PasswordResetConfirmSerializer',
     
     # Alumno
     'AlumnoSerializer',

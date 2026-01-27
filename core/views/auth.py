@@ -1,14 +1,18 @@
 # core/views/auth.py
+from datetime import timedelta
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from core.models import User, Alumno, Docente
+from core.utils.email import send_password_reset_email
 from ..serializers import (
-    LoginSerializer, RegisterSerializer, UserSerializer, AlumnoSerializer
+    LoginSerializer, RegisterSerializer, UserSerializer, AlumnoSerializer,
+    PasswordResetRequestSerializer, PasswordResetConfirmSerializer
 )
 
 
@@ -342,3 +346,203 @@ def verify_token_view(request):
             {'valid': False, 'error': str(e)},
             status=status.HTTP_401_UNAUTHORIZED
         )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def password_reset_request_view(request):
+    """
+    Endpoint para solicitar reset de contraseña
+    
+    POST /api/auth/password-reset/request/
+    Body: {
+        "email": "usuario@example.com"
+    }
+    
+    Response: {
+        "message": "Si el correo existe, recibirás instrucciones para restablecer tu contraseña"
+    }
+    """
+    serializer = PasswordResetRequestSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        email = serializer.validated_data['email']
+        
+        try:
+            user = User.objects.get(email=email, is_active=True)
+            
+            # Generar token JWT especial para reset
+            refresh = RefreshToken.for_user(user)
+            
+            # Agregar claim personalizado
+            refresh['type'] = 'password_reset'
+            
+            # Token de acceso con expiración de 1 hora
+            access_token = refresh.access_token
+            access_token.set_exp(lifetime=timedelta(hours=1))
+            
+            reset_token = str(access_token)
+            
+            # Guardar el token en OutstandingToken para poder invalidarlo después
+            from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
+            from django.utils import timezone
+            
+            OutstandingToken.objects.create(
+                user_id=user.id,
+                jti=access_token['jti'],
+                token=reset_token,
+                created_at=timezone.now(),
+                expires_at=timezone.now() + timedelta(hours=1)
+            )
+            
+            # Enviar correo
+            send_password_reset_email(
+                user_email=user.email,
+                reset_token=reset_token,
+                user_name=user.nombre_completo or user.get_full_name()
+            )
+            
+        except User.DoesNotExist:
+            # Por seguridad, no revelamos si el email existe
+            pass
+        
+        # Siempre retornamos el mismo mensaje
+        return Response({
+            'message': 'Si el correo existe, recibirás instrucciones para restablecer tu contraseña'
+        }, status=status.HTTP_200_OK)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def password_reset_validate_view(request):
+    """
+    Endpoint para validar token de reset
+    
+    POST /api/auth/password-reset/validate/
+    Body: {
+        "token": "eyJ0eXAiOiJKV1QiLCJhbGc..."
+    }
+    
+    Response: {
+        "valid": true,
+        "message": "Token válido"
+    }
+    """
+    token = request.data.get('token')
+    
+    if not token:
+        return Response(
+            {'error': 'Token es requerido'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        # Decodificar token
+        access_token = AccessToken(token)
+        
+        # Verificar que sea un token de tipo password_reset
+        if access_token.get('type') != 'password_reset':
+            return Response(
+                {'valid': False, 'error': 'Token inválido'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Verificar que el usuario exista y esté activo
+        user_id = access_token.get('user_id')
+        user = User.objects.get(id=user_id, is_active=True)
+        
+        return Response({
+            'valid': True,
+            'message': 'Token válido',
+            'email': user.email  # Para mostrar en el frontend
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response(
+            {'valid': False, 'error': 'Token inválido o expirado'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def password_reset_confirm_view(request):
+    """
+    Endpoint para confirmar reset de contraseña
+    
+    POST /api/auth/password-reset/confirm/
+    Body: {
+        "token": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+        "new_password": "nueva_contraseña",
+        "new_password2": "nueva_contraseña"
+    }
+    
+    Response: {
+        "message": "Contraseña actualizada exitosamente"
+    }
+    """
+    serializer = PasswordResetConfirmSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        token = serializer.validated_data['token']
+        new_password = serializer.validated_data['new_password']
+        
+        try:
+            # Decodificar y validar token
+            access_token = AccessToken(token)
+            
+            # Verificar que sea token de password_reset
+            if access_token.get('type') != 'password_reset':
+                return Response(
+                    {'error': 'Token inválido'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Verificar si el token ya está en blacklist
+            from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
+            
+            jti = access_token.get('jti')
+            outstanding_token = OutstandingToken.objects.filter(jti=jti).first()
+            
+            if not outstanding_token:
+                return Response(
+                    {'error': 'Token inválido'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Verificar si ya está en blacklist
+            if BlacklistedToken.objects.filter(token=outstanding_token).exists():
+                return Response(
+                    {'error': 'Token ya ha sido utilizado'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Obtener usuario
+            user_id = access_token.get('user_id')
+            user = User.objects.get(id=user_id, is_active=True)
+            
+            # Actualizar contraseña
+            user.set_password(new_password)
+            user.save()
+            
+            # Agregar token al blacklist
+            BlacklistedToken.objects.create(token=outstanding_token)
+            
+            return Response({
+                'message': 'Contraseña actualizada exitosamente'
+            }, status=status.HTTP_200_OK)
+            
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'Usuario no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': 'Token inválido o expirado'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
