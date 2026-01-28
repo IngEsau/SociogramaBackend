@@ -1,5 +1,6 @@
 # core/views/auth.py
 from datetime import timedelta
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -76,6 +77,7 @@ def login_view(request):
     Response: {
         "access": "token_de_acceso",
         "refresh": "token_de_refresh",
+        "first_login": true/false,  # Indica si es primer login
         "user": {...}
     }
     """
@@ -91,15 +93,16 @@ def login_view(request):
         response_data = {
             'access': str(refresh.access_token),
             'refresh': str(refresh),
+            'first_login': user.last_login is None,  # Detectar primer login
             'user': {
                 'id': user.id,
                 'username': user.username,
                 'email': user.email,
-                'nombre_completo': user.nombre_completo or user.get_full_name(),  # Campo directo
+                'nombre_completo': user.nombre_completo or user.get_full_name(),
                 'first_name': user.first_name,
                 'last_name': user.last_name,
-                'rol': user.rol,  # Campo directo
-                'genero': user.genero,  # Campo directo
+                'rol': user.rol,
+                'genero': user.genero,
                 'is_staff': user.is_staff,
             }
         }
@@ -265,7 +268,7 @@ def me_view(request):
 @permission_classes([IsAuthenticated])
 def change_password_view(request):
     """
-    Endpoint para cambiar contraseña
+    Endpoint para cambiar contraseña (USUARIOS REGULARES)
     
     POST /api/auth/change-password/
     Body: {
@@ -273,6 +276,8 @@ def change_password_view(request):
         "new_password": "contraseña_nueva",
         "new_password2": "contraseña_nueva"
     }
+    
+    NOTA: Para primer login, usar /api/auth/first-login-change-password/
     """
     user = request.user
     old_password = request.data.get('old_password')
@@ -310,6 +315,89 @@ def change_password_view(request):
     
     return Response(
         {'message': 'Contraseña actualizada exitosamente'},
+        status=status.HTTP_200_OK
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def first_login_change_password_view(request):
+    """
+    Endpoint para cambiar contraseña en el PRIMER LOGIN
+    
+    POST /api/auth/first-login-change-password/
+    Body: {
+        "new_password": "contraseña_nueva",
+        "new_password2": "contraseña_nueva"
+    }
+    
+    Este endpoint:
+    - Solo funciona si last_login es NULL (primer login)
+    - NO requiere contraseña antigua
+    - Actualiza last_login automáticamente
+    - Marca que el usuario ya no está en primer login
+    
+    Response: {
+        "message": "Contraseña actualizada exitosamente",
+        "first_login_completed": true
+    }
+    """
+    user = request.user
+    
+    # VALIDACIÓN 1: Verificar que sea primer login
+    if user.last_login is not None:
+        return Response(
+            {
+                'error': 'Este endpoint solo está disponible para el primer login',
+                'detail': 'Use /api/auth/change-password/ para cambiar su contraseña'
+            },
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    # VALIDACIÓN 2: Obtener datos
+    new_password = request.data.get('new_password')
+    new_password2 = request.data.get('new_password2')
+    
+    if not all([new_password, new_password2]):
+        return Response(
+            {'error': 'Todos los campos son requeridos'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # VALIDACIÓN 3: Verificar que coincidan
+    if new_password != new_password2:
+        return Response(
+            {'error': 'Las contraseñas no coinciden'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # VALIDACIÓN 4: Longitud mínima
+    if len(new_password) < 8:
+        return Response(
+            {'error': 'La contraseña debe tener al menos 8 caracteres'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # VALIDACIÓN 5: No puede ser igual a la contraseña temporal
+    if user.check_password(new_password):
+        return Response(
+            {'error': 'La nueva contraseña no puede ser igual a la contraseña temporal'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # ACTUALIZAR contraseña
+    user.set_password(new_password)
+    
+    # IMPORTANTE: Actualizar last_login para marcar que ya no es primer login
+    user.last_login = timezone.now()
+    user.save()
+    
+    return Response(
+        {
+            'message': 'Contraseña actualizada exitosamente',
+            'first_login_completed': True,
+            'detail': 'Ahora puede usar el sistema normalmente'
+        },
         status=status.HTTP_200_OK
     )
 
