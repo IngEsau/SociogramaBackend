@@ -16,6 +16,7 @@ from .auth import (
     password_reset_request_view,
     password_reset_validate_view,
     password_reset_confirm_view,
+    first_login_change_password_view,
 )
 
 # Views de administración
@@ -47,6 +48,7 @@ __all__ = [
     'password_reset_request_view',
     'password_reset_validate_view',
     'password_reset_confirm_view',
+    'first_login_change_password_view',
     
     # Administración
     'import_csv_view',

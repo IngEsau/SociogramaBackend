@@ -5,7 +5,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
     login_view, logout_view, register_view,
-    me_view, change_password_view, verify_token_view,
+    me_view, change_password_view, first_login_change_password_view, verify_token_view,
     CustomTokenObtainPairView,
     password_reset_request_view, password_reset_validate_view, password_reset_confirm_view,
     import_csv_view,
@@ -28,7 +28,12 @@ urlpatterns = [
     path('auth/logout/', logout_view, name='logout'),
     path('auth/register/', register_view, name='register'),
     path('auth/me/', me_view, name='me'),
+    
+    # Cambio de contraseña
     path('auth/change-password/', change_password_view, name='change-password'),
+    path('auth/first-login-change-password/', first_login_change_password_view, name='first-login-change-password'),
+    
+    # Tokens
     path('auth/verify-token/', verify_token_view, name='verify-token'),
     path('auth/token/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
@@ -43,7 +48,7 @@ urlpatterns = [
     # ADMINISTRACIÓN - IMPORTACIONES
     # ========================================
     path('admin/import-csv/', import_csv_view, name='import-csv'),
-    path('admin/import-grupos-completos/', import_csv_view, name='import-grupos-completos'),  # Alias más claro
+    path('admin/import-grupos-completos/', import_csv_view, name='import-grupos-completos'),
     path('admin/import-docentes/', import_docentes_view, name='import-docentes'),
     path('admin/import-alumnos/', import_alumnos_view, name='import-alumnos'),
     
