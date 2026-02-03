@@ -25,7 +25,7 @@ from .pregunta import (
     RespuestaCreateSerializer
 )
 
-# Serializers de docentes (NUEVO)
+# Serializers de docentes
 from .docente import (
     DocenteSerializer,
     DocenteSimpleSerializer

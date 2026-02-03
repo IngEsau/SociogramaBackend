@@ -298,5 +298,25 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', os.getenv('EMAIL_HOST_USER'
 # URL del frontend para enlaces de reset
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 
+
+# ============================================
+# CACHE AND TEMP FILES CONFIGURATION
+# ============================================
+
+# Cache para archivos temporales de importación
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
+        'OPTIONS': {
+            'MAX_ENTRIES': 1000
+        }
+    }
+}
+
+# Configuración de archivos temporales
+import tempfile
+TEMP_DIR = tempfile.gettempdir()
+
 # Crear carpeta de logs si no existe
 os.makedirs(BASE_DIR / 'logs', exist_ok=True)

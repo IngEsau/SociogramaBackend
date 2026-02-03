@@ -26,6 +26,8 @@ from .admin import (
     import_alumnos_view,
     asignar_tutor_view,
     remover_tutor_view,
+    analizar_importacion_view,
+    ejecutar_importacion_view,
 )
 
 # Views académicas
@@ -56,6 +58,8 @@ __all__ = [
     'import_alumnos_view',
     'asignar_tutor_view',
     'remover_tutor_view',
+    'analizar_importacion_view',
+    'ejecutar_importacion_view',
     
     # Académico
     'my_groups_view',

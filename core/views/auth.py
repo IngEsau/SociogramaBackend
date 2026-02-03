@@ -9,53 +9,16 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from core.models import User, Alumno, Docente
+from core.models import User, Alumno, Docente, AlumnoGrupo  
 from core.utils.email import send_password_reset_email
+from core.utils.auth_validators import (
+    validate_user_active_status,
+    CustomTokenObtainPairView
+)
 from ..serializers import (
     LoginSerializer, RegisterSerializer, UserSerializer, AlumnoSerializer,
     PasswordResetRequestSerializer, PasswordResetConfirmSerializer
 )
-
-
-# ============================================
-# CUSTOM TOKEN SERIALIZER
-# ============================================
-
-class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """Serializador personalizado para incluir info adicional en el token"""
-    
-    def validate(self, attrs):
-        data = super().validate(attrs)
-        
-        # Agregar información del User extendido
-        data['user'] = {
-            'id': self.user.id,
-            'username': self.user.username,
-            'email': self.user.email,
-            'nombre_completo': self.user.nombre_completo or self.user.get_full_name(), 
-            'rol': self.user.rol,  
-            'genero': self.user.genero,  
-            'is_staff': self.user.is_staff,
-        }
-        
-        # Si es alumno, agregar info del alumno
-        if self.user.rol == 'ALUMNO':  
-            try:
-                alumno = Alumno.objects.get(user=self.user)
-                data['user']['alumno'] = {
-                    'id': alumno.id,
-                    'matricula': alumno.matricula,
-                    'semestre': alumno.semestre_actual,
-                    'estatus': alumno.estatus,
-                }
-            except Alumno.DoesNotExist:
-                pass
-        
-        return data
-
-
-class CustomTokenObtainPairView(TokenObtainPairView):
-    serializer_class = CustomTokenObtainPairSerializer
 
 
 # ============================================
@@ -85,6 +48,13 @@ def login_view(request):
     
     if serializer.is_valid():
         user = serializer.validated_data['user']
+        
+        # ============================================
+        # VALIDAR ESTATUS ACTIVO
+        # ============================================
+        is_valid, error_response = validate_user_active_status(user)
+        if not is_valid:
+            return error_response
         
         # Generar tokens JWT
         refresh = RefreshToken.for_user(user)

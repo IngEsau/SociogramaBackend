@@ -122,8 +122,9 @@ sociograma_project/
 │   │       ├── helpers.py        # Funciones auxiliares
 │   │       ├── import_csv.py     # Importación CSV
 │   │       ├── asignar_tutor.py     # Asignar Tutores
-│   │       ├── asignar_docentes.py     # Asignar Docentes CSV
-│   │       └── asignar_alumnos.py     # Asignar Alumnos CSV
+│   │       ├── import_docentes.py     # Importar Docentes CSV
+│   │       ├── import_excel.py
+│   │       └── import_alumnos.py     # Importar Alumnos CSV
 │   │
 │   ├── serializers/
 │   │   ├── alumno.py
@@ -137,6 +138,8 @@ sociograma_project/
 │   ├── utils/
 │   │   ├── auth.py
 │   │   ├── decorators.py
+│   │   ├── auth_validators.py
+│   │   ├── import_excel_helpers.py
 │   │   ├── validators.py
 │   │   └── __init__.py
 │   │
