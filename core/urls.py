@@ -15,7 +15,12 @@ from .views import (
     remover_tutor_view,
     my_groups_view,
     analizar_importacion_view,
-    ejecutar_importacion_view
+    ejecutar_importacion_view,
+    listar_periodos_view,
+    activar_periodo_view,
+    desactivar_periodo_view,
+    crear_periodo_view,
+    obtener_periodo_activo_view,
 )
 
 router = DefaultRouter()
@@ -60,6 +65,18 @@ urlpatterns = [
     # ADMINISTRACIÓN - GESTIÓN
     path('admin/asignar-tutor/', asignar_tutor_view, name='asignar-tutor'),
     path('admin/remover-tutor/', remover_tutor_view, name='remover-tutor'),
+
+    # ADMINISTRACIÓN -GESTIÓN DE PERIODOS
+        # Listar todos los periodos (admin)
+    path('admin/periodos/', listar_periodos_view, name='listar_periodos'),
+        # Crear nuevo periodo (admin)
+    path('admin/periodos/crear/', crear_periodo_view, name='crear_periodo'),
+        # Activar un periodo específico (admin)
+    path('admin/periodos/<int:periodo_id>/activar/', activar_periodo_view, name='activar_periodo'),
+        # Desactivar un periodo específico (admin)
+    path('admin/periodos/<int:periodo_id>/desactivar/', desactivar_periodo_view, name='desactivar_periodo'),
+        # Obtener periodo activo (cualquier usuario autenticado)
+    path('periodos/activo/', obtener_periodo_activo_view, name='periodo_activo'),
 
 
     # ========================================

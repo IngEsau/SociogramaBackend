@@ -28,6 +28,11 @@ from .admin import (
     remover_tutor_view,
     analizar_importacion_view,
     ejecutar_importacion_view,
+    listar_periodos_view,
+    activar_periodo_view,
+    desactivar_periodo_view,
+    crear_periodo_view,
+    obtener_periodo_activo_view,
 )
 
 # Views académicas
@@ -60,6 +65,13 @@ __all__ = [
     'remover_tutor_view',
     'analizar_importacion_view',
     'ejecutar_importacion_view',
+
+    # Administración de Periodos
+    'listar_periodos_view',
+    'activar_periodo_view',
+    'desactivar_periodo_view',
+    'crear_periodo_view',
+    'obtener_periodo_activo_view',
     
     # Académico
     'my_groups_view',
