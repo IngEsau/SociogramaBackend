@@ -1,7 +1,12 @@
 """
-Script de importación de datos desde Excel (4 hojas) - VERSIÓN MEJORADA
+Script de importación de datos desde Excel (4 hojas) - VERSIÓN MEJORADA CON GESTIÓN DE PERIODOS
 Sistema de Sociograma UTP
 
+MEJORAS:
+- Selección inteligente de periodos (usar existente o crear nuevo)
+- Desactivación automática de periodos anteriores
+- Gestión de bajas automáticas (alumnos que ya no aparecen)
+- Reporte detallado de cambios
 """
 import os
 import sys
@@ -113,26 +118,132 @@ def generar_username(matricula_o_empleado):
     return str(matricula_o_empleado).strip().lower().replace(' ', '')
 
 
-def crear_periodo_actual():
-    logger.log("📅 Creando periodo académico...")
+# =============================================================================
+# GESTIÓN DE PERIODOS
+# =============================================================================
+
+def seleccionar_periodo():
+    """
+    Muestra periodos existentes y permite seleccionar uno o crear nuevo
+    Retorna: objeto Periodo
+    """
+    logger.log("\n" + "="*70)
+    logger.log("📅 GESTIÓN DE PERIODOS")
+    logger.log("="*70)
     
-    periodo, created = Periodo.objects.get_or_create(
-        codigo='2025-2',
-        defaults={
-            'nombre': 'Mayo - Agosto 2025',
-            'fecha_inicio': date(2025, 5, 1),
-            'fecha_fin': date(2025, 8, 31),
-            'activo': True
+    # Configuración de periodos UTP (3 por año)
+    PERIODOS_CONFIG = {
+        '1': {
+            'nombre': 'Enero - Abril',
+            'fecha_inicio_base': (1, 15),  # mes, día
+            'fecha_fin_base': (4, 30)
+        },
+        '2': {
+            'nombre': 'Mayo - Agosto',
+            'fecha_inicio_base': (5, 1),
+            'fecha_fin_base': (8, 31)
+        },
+        '3': {
+            'nombre': 'Septiembre - Diciembre',
+            'fecha_inicio_base': (9, 1),
+            'fecha_fin_base': (12, 15)
         }
-    )
+    }
     
-    if created:
-        logger.log_success(f"Creado: {periodo.codigo} - {periodo.nombre}")
+    # Mostrar periodos existentes
+    periodos_existentes = Periodo.objects.all().order_by('-codigo')
+    
+    if periodos_existentes.exists():
+        logger.log("\nPERIODOS EN LA BASE DE DATOS:")
+        for idx, p in enumerate(periodos_existentes, 1):
+            estado = "🟢 ACTIVO" if p.activo == 1 else "⚪ INACTIVO"
+            logger.log(f"{idx}. {p.codigo} - {p.nombre} {estado}")
+        
+        usar_existente = input("\n¿Usar un periodo existente? (número) o 'n' para crear nuevo: ").strip()
+        
+        if usar_existente.isdigit() and 1 <= int(usar_existente) <= len(periodos_existentes):
+            periodo = list(periodos_existentes)[int(usar_existente) - 1]
+            logger.log_success(f"Usando periodo: {periodo.codigo} - {periodo.nombre}")
+            return periodo
     else:
-        logger.log_info(f"Ya existía: {periodo.codigo} - {periodo.nombre}")
+        logger.log_info("No hay periodos en la base de datos")
+    
+    # Crear nuevo periodo
+    logger.log("\n➕ CREAR NUEVO PERIODO")
+    año_actual = datetime.now().year
+    año_input = input(f"¿Año? [{año_actual}]: ").strip()
+    año = int(año_input) if año_input else año_actual
+    
+    logger.log(f"\nPERIODOS DISPONIBLES PARA {año}:")
+    logger.log(f"1. Enero - Abril {año}")
+    logger.log(f"2. Mayo - Agosto {año}")
+    logger.log(f"3. Septiembre - Diciembre {año}")
+    
+    periodo_num = input("\nSelecciona periodo (1/2/3): ").strip()
+    
+    if periodo_num not in ['1', '2', '3']:
+        logger.log_error("Periodo inválido. Usando periodo 2 por defecto.")
+        periodo_num = '2'
+    
+    # Generar datos del periodo
+    config = PERIODOS_CONFIG[periodo_num]
+    codigo = f"{año}-{periodo_num}"
+    nombre = f"{config['nombre']} {año}"
+    
+    fecha_inicio = date(año, config['fecha_inicio_base'][0], config['fecha_inicio_base'][1])
+    fecha_fin = date(año, config['fecha_fin_base'][0], config['fecha_fin_base'][1])
+    
+    # Crear periodo
+    with transaction.atomic():
+        periodo, created = Periodo.objects.get_or_create(
+            codigo=codigo,
+            defaults={
+                'nombre': nombre,
+                'fecha_inicio': fecha_inicio,
+                'fecha_fin': fecha_fin,
+                'activo': 1
+            }
+        )
+        
+        if created:
+            logger.log_success(f"Creado: {periodo.codigo} - {periodo.nombre}")
+        else:
+            logger.log_info(f"Ya existía: {periodo.codigo} - {periodo.nombre}")
     
     return periodo
 
+
+def desactivar_periodo_anterior(periodo_actual):
+    """
+    Desactiva todos los periodos anteriores y sus grupos/relaciones
+    """
+    logger.log("\n⚠️  Desactivando periodos anteriores...")
+    
+    with transaction.atomic():
+        # 1. Desactivar periodos anteriores
+        periodos_desactivados = Periodo.objects.exclude(id=periodo_actual.id).filter(activo=1).update(activo=0)
+        
+        # 2. Desactivar grupos de periodos inactivos
+        grupos_desactivados = Grupo.objects.filter(periodo__activo=0, activo=1).update(activo=0)
+        
+        # 3. Desactivar relaciones alumno-grupo de periodos inactivos
+        relaciones_desactivadas = AlumnoGrupo.objects.filter(
+            grupo__periodo__activo=0,
+            activo=1
+        ).update(activo=0)
+        
+        logger.log(f"   Periodos desactivados: {periodos_desactivados}")
+        logger.log(f"   Grupos desactivados: {grupos_desactivados}")
+        logger.log(f"   Inscripciones desactivadas: {relaciones_desactivadas}")
+        
+        # Activar el periodo actual por si acaso
+        Periodo.objects.filter(id=periodo_actual.id).update(activo=1)
+        logger.log_success(f"Periodo activo: {periodo_actual.codigo}")
+
+
+# =============================================================================
+# IMPORTACIÓN DE DATOS
+# =============================================================================
 
 def importar_divisiones_programas(df_alumnos, df_grupos):
     """Extrae y crea Divisiones y Programas"""
@@ -162,7 +273,7 @@ def importar_divisiones_programas(df_alumnos, df_grupos):
             codigo=codigo,
             defaults={
                 'nombre': div_nombre,
-                'activa': True
+                'activa': 1
             }
         )
         
@@ -216,7 +327,7 @@ def importar_divisiones_programas(df_alumnos, df_grupos):
                 'nombre': prog_nombre,
                 'division': division,
                 'duracion_semestres': 9,
-                'activo': True
+                'activo': 1
             }
         )
         
@@ -391,7 +502,7 @@ def importar_grupos(df_grupos, programas_cache, tutores_cache, periodo):
                         'turno': turno or 'Matutino',
                         'programa': programa,
                         'tutor': tutor,
-                        'activo': True,
+                        'activo': 1,  # Cambio: usar 1 en lugar de True
                         'cupo_maximo': 40
                     }
                 )
@@ -468,7 +579,7 @@ def importar_alumnos(df_alumnos, programas_cache):
                         defaults={
                             'nombre': plan_codigo,
                             'anio_inicio': 2020,
-                            'activo': True
+                            'activo': 1
                         }
                     )
                 
@@ -583,7 +694,7 @@ def importar_relaciones_inscritos(df_inscritos, alumnos_cache, grupos_cache):
                     grupo=grupo,
                     defaults={
                         'fecha_inscripcion': date.today(),
-                        'activo': True
+                        'activo': 1  # Cambio: usar 1 en lugar de True
                     }
                 )
                 
@@ -611,13 +722,85 @@ def importar_relaciones_inscritos(df_inscritos, alumnos_cache, grupos_cache):
     if grupos_no_encontrados:
         logger.log_error(f"Grupos no encontrados: {len(grupos_no_encontrados)}", SECCION)
         logger.log(f"     Ejemplos: {list(grupos_no_encontrados)[:3]}")
+    
+    return total_creados
 
+
+# =============================================================================
+# REPORTE DE BAJAS AUTOMÁTICAS
+# =============================================================================
+
+def generar_reporte_bajas(periodo_actual, matriculas_nuevas):
+    """
+    Genera reporte de alumnos nuevos, continuos y dados de baja
+    """
+    logger.log("\n" + "="*70)
+    logger.log("📊 REPORTE DE CAMBIOS EN ALUMNADO")
+    logger.log("="*70)
+    
+    # Obtener alumnos del periodo actual (activos)
+    alumnos_actuales = set(
+        AlumnoGrupo.objects.filter(
+            grupo__periodo=periodo_actual,
+            activo=1
+        ).values_list('alumno__matricula', flat=True)
+    )
+    
+    # Buscar periodo anterior
+    periodo_anterior = Periodo.objects.filter(
+        activo=0
+    ).order_by('-codigo').first()
+    
+    if periodo_anterior:
+        # Alumnos que estaban en el periodo anterior
+        alumnos_anteriores = set(
+            AlumnoGrupo.objects.filter(
+                grupo__periodo=periodo_anterior,
+                activo=0  # Ya fueron desactivados
+            ).values_list('alumno__matricula', flat=True)
+        )
+        
+        # Calcular diferencias
+        alumnos_nuevos = alumnos_actuales - alumnos_anteriores
+        alumnos_continuos = alumnos_actuales & alumnos_anteriores
+        alumnos_baja = alumnos_anteriores - alumnos_actuales
+        
+        logger.log(f"\n📈 Estadísticas:")
+        logger.log(f"   Periodo actual: {periodo_actual.codigo}")
+        logger.log(f"   Periodo anterior: {periodo_anterior.codigo}")
+        logger.log("")
+        logger.log_success(f"Alumnos NUEVOS (primera vez): {len(alumnos_nuevos)}")
+        logger.log_success(f"Alumnos CONTINUOS (estaban y siguen): {len(alumnos_continuos)}")
+        logger.log_warning(f"Alumnos dados de BAJA (ya no aparecen): {len(alumnos_baja)}")
+        
+        # Guardar detalles en archivo
+        if alumnos_baja:
+            with open('alumnos_dados_de_baja.txt', 'w', encoding='utf-8') as f:
+                f.write(f"ALUMNOS DADOS DE BAJA - {periodo_anterior.codigo} → {periodo_actual.codigo}\n")
+                f.write(f"{'='*70}\n\n")
+                f.write(f"Total: {len(alumnos_baja)} alumnos\n\n")
+                f.write("Matrículas:\n")
+                for matricula in sorted(alumnos_baja):
+                    alumno = Alumno.objects.filter(matricula=matricula).first()
+                    if alumno:
+                        nombre = alumno.user.nombre_completo or alumno.user.get_full_name()
+                        f.write(f"  - {matricula}: {nombre}\n")
+            
+            logger.log_info(f"Detalles guardados en: alumnos_dados_de_baja.txt")
+    else:
+        logger.log_info("No hay periodo anterior para comparar")
+        logger.log_success(f"Total de alumnos en {periodo_actual.codigo}: {len(alumnos_actuales)}")
+
+
+# =============================================================================
+# FUNCIÓN PRINCIPAL
+# =============================================================================
 
 def main():
     """Función principal"""
     logger.log("="*70)
     logger.log("IMPORTACIÓN DE DATOS DESDE EXCEL (4 HOJAS)")
-    logger.log("Sistema de Sociograma UTP")
+    logger.log("Sistema de Sociograma UTP - Versión Mejorada")
     logger.log("="*70)
     
     archivo_excel = 'datos.xlsx'
@@ -692,17 +875,29 @@ def main():
         df_tutores = leer_hoja_inteligente(excel_file, hojas_map['tutores'])
         df_inscritos = leer_hoja_inteligente(excel_file, hojas_map['inscritos'])
         
-        # Crear periodo
-        periodo = crear_periodo_actual()
+        # =====================================================================
+        # GESTIÓN DE PERIODOS (NUEVO)
+        # =====================================================================
+        periodo = seleccionar_periodo()
+        desactivar_periodo_anterior(periodo)
         
-        # Importar en orden
+        # =====================================================================
+        # IMPORTAR EN ORDEN
+        # =====================================================================
         divisiones_cache, programas_cache = importar_divisiones_programas(df_alumnos, df_grupos)
         tutores_cache = importar_tutores(df_tutores, divisiones_cache) if not df_tutores.empty else {}
         grupos_cache = importar_grupos(df_grupos, programas_cache, tutores_cache, periodo) if not df_grupos.empty else {}
         alumnos_cache = importar_alumnos(df_alumnos, programas_cache) if not df_alumnos.empty else {}
         
+        matriculas_importadas = set(alumnos_cache.keys())
+        
         if not df_inscritos.empty:
             importar_relaciones_inscritos(df_inscritos, alumnos_cache, grupos_cache)
+        
+        # =====================================================================
+        # REPORTE DE BAJAS (NUEVO)
+        # =====================================================================
+        generar_reporte_bajas(periodo, matriculas_importadas)
         
         # Mostrar resumen de errores
         logger.mostrar_resumen_errores()
@@ -721,6 +916,14 @@ def main():
         logger.log(f"   Alumnos: {Alumno.objects.count()}")
         logger.log(f"   Relaciones Alumno-Grupo: {AlumnoGrupo.objects.count()}")
         logger.log(f"   Usuarios totales: {User.objects.count()}")
+        
+        # Resumen del periodo actual
+        grupos_activos = Grupo.objects.filter(periodo=periodo, activo=1).count()
+        relaciones_activas = AlumnoGrupo.objects.filter(grupo__periodo=periodo, activo=1).count()
+        
+        logger.log(f"\n📅 Periodo actual: {periodo.codigo}")
+        logger.log(f"   Grupos activos: {grupos_activos}")
+        logger.log(f"   Alumnos inscritos: {relaciones_activas}")
         
         # Estado final
         total_errores = sum(len(errores) for errores in logger.errores_por_seccion.values())

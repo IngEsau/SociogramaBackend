@@ -13,7 +13,9 @@ from .views import (
     import_alumnos_view,
     asignar_tutor_view,
     remover_tutor_view,
-    my_groups_view
+    my_groups_view,
+    analizar_importacion_view,
+    ejecutar_importacion_view
 )
 
 router = DefaultRouter()
@@ -51,6 +53,9 @@ urlpatterns = [
     path('admin/import-grupos-completos/', import_csv_view, name='import-grupos-completos'),
     path('admin/import-docentes/', import_docentes_view, name='import-docentes'),
     path('admin/import-alumnos/', import_alumnos_view, name='import-alumnos'),
+       # Importación masiva
+    path('admin/importacion/analizar/', analizar_importacion_view   , name='importacion_analizar'),
+    path('admin/importacion/ejecutar/', ejecutar_importacion_view, name='importacion_ejecutar'),
     
     # ADMINISTRACIÓN - GESTIÓN
     path('admin/asignar-tutor/', asignar_tutor_view, name='asignar-tutor'),
