@@ -124,6 +124,7 @@ sociograma_project/
 │   │       ├── asignar_tutor.py     # Asignar Tutores
 │   │       ├── import_docentes.py     # Importar Docentes CSV
 │   │       ├── import_excel.py
+│   │       ├── periodos.py
 │   │       └── import_alumnos.py     # Importar Alumnos CSV
 │   │
 │   ├── serializers/
@@ -388,4 +389,4 @@ python manage.py test
 
 Proyecto académico - Universidad Tecnológica de Puebla
 
-**Última actualización:** 01/26/2026
+**Última actualización:** 02/03/2026
