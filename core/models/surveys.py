@@ -1,7 +1,7 @@
 # core/models/surveys.py
 """
 Modelos de Cuestionarios Sociométricos
-Pregunta, Opcion, Respuesta
+Pregunta, Opcion, Respuesta, Cuestionario, CuestionarioPregunta, CuestionarioEstado
 """
 from django.db import models
 from .people import Alumno
@@ -62,6 +62,153 @@ class Opcion(models.Model):
         return f"{self.pregunta.orden}.{self.orden}: {self.texto}"
 
 
+class Cuestionario(models.Model):
+    """Cuestionarios sociométricos por periodo"""
+    titulo = models.CharField(max_length=200)
+    descripcion = models.TextField(blank=True, null=True)
+    periodo = models.ForeignKey(
+        'Periodo',
+        on_delete=models.CASCADE,
+        related_name='cuestionarios',
+        db_column='periodo_id'
+    )
+    fecha_inicio = models.DateTimeField()
+    fecha_fin = models.DateTimeField()
+    activo = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'cuestionarios'
+        managed = True
+        verbose_name = 'Cuestionario'
+        verbose_name_plural = 'Cuestionarios'
+        ordering = ['-creado_en']
+    
+    def __str__(self):
+        return f"{self.titulo} - {self.periodo.nombre}"
+    
+    @property
+    def esta_activo(self):
+        """Verificar si está en periodo de aplicación"""
+        from django.utils import timezone
+        now = timezone.now()
+        return self.activo and self.fecha_inicio <= now <= self.fecha_fin
+    
+    @property
+    def total_respuestas(self):
+        """Contar respuestas del cuestionario"""
+        return self.respuestas.count()
+    
+    @property
+    def total_preguntas(self):
+        """Contar preguntas del cuestionario"""
+        return self.preguntas.count()
+    
+    @property
+    def total_grupos(self):
+        """Contar grupos que tienen estados en este cuestionario"""
+        return self.estados.values('grupo').distinct().count()
+
+
+class CuestionarioPregunta(models.Model):
+    """Relación entre cuestionarios y preguntas"""
+    cuestionario = models.ForeignKey(
+        Cuestionario,
+        on_delete=models.CASCADE,
+        related_name='preguntas',
+        db_column='cuestionario_id'
+    )
+    pregunta = models.ForeignKey(
+        Pregunta,
+        on_delete=models.CASCADE,
+        related_name='cuestionarios',
+        db_column='pregunta_id'
+    )
+    orden = models.IntegerField(default=1)
+    
+    class Meta:
+        db_table = 'cuestionario_preguntas'
+        managed = True
+        unique_together = [['cuestionario', 'pregunta']]
+        ordering = ['orden']
+        verbose_name = 'Pregunta de Cuestionario'
+        verbose_name_plural = 'Preguntas de Cuestionario'
+    
+    def __str__(self):
+        return f"{self.cuestionario.titulo} - Pregunta {self.orden}"
+
+
+class CuestionarioEstado(models.Model):
+    """Estado de completitud del cuestionario por alumno y grupo"""
+    ESTADOS = [
+        ('PENDIENTE', 'Pendiente'),
+        ('EN_PROGRESO', 'En Progreso'),
+        ('COMPLETADO', 'Completado'),
+    ]
+    
+    cuestionario = models.ForeignKey(
+        Cuestionario,
+        on_delete=models.CASCADE,
+        related_name='estados',
+        db_column='cuestionario_id'
+    )
+    alumno = models.ForeignKey(
+        Alumno,
+        on_delete=models.CASCADE,
+        related_name='cuestionarios_estado',
+        db_column='alumno_id'
+    )
+    grupo = models.ForeignKey(
+        'Grupo',
+        on_delete=models.CASCADE,
+        related_name='cuestionarios_estado',
+        db_column='grupo_id'
+    )
+    estado = models.CharField(max_length=20, choices=ESTADOS, default='PENDIENTE')
+    fecha_inicio = models.DateTimeField(null=True, blank=True)
+    fecha_completado = models.DateTimeField(null=True, blank=True)
+    progreso = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
+    
+    class Meta:
+        db_table = 'cuestionario_estado'
+        managed = True
+        unique_together = [['cuestionario', 'alumno', 'grupo']]
+        verbose_name = 'Estado de Cuestionario'
+        verbose_name_plural = 'Estados de Cuestionario'
+    
+    def __str__(self):
+        return f"{self.alumno.matricula} - {self.grupo.clave} - {self.cuestionario.titulo} ({self.estado})"
+    
+    def actualizar_progreso(self):
+        """Calcular progreso basado en preguntas respondidas"""
+        total_preguntas = self.cuestionario.preguntas.count()
+        if total_preguntas == 0:
+            return 0
+        
+        respuestas_count = self.cuestionario.respuestas.filter(
+            alumno=self.alumno
+        ).values('pregunta').distinct().count()
+        
+        self.progreso = (respuestas_count / total_preguntas) * 100
+        
+        # Actualizar estado según progreso
+        if self.progreso == 0:
+            self.estado = 'PENDIENTE'
+        elif self.progreso == 100:
+            self.estado = 'COMPLETADO'
+            if not self.fecha_completado:
+                from django.utils import timezone
+                self.fecha_completado = timezone.now()
+        else:
+            self.estado = 'EN_PROGRESO'
+            if not self.fecha_inicio:
+                from django.utils import timezone
+                self.fecha_inicio = timezone.now()
+        
+        self.save()
+        return self.progreso
+
+
 class Respuesta(models.Model):
     """Respuestas de alumnos a preguntas"""
     alumno = models.ForeignKey(
@@ -69,6 +216,14 @@ class Respuesta(models.Model):
         on_delete=models.CASCADE,
         related_name='respuestas',
         db_column='alumno_id'
+    )
+    cuestionario = models.ForeignKey(
+        Cuestionario,
+        on_delete=models.CASCADE,
+        related_name='respuestas',
+        null=True,
+        blank=True,
+        db_column='cuestionario_id'
     )
     pregunta = models.ForeignKey(
         Pregunta,
@@ -100,7 +255,7 @@ class Respuesta(models.Model):
     class Meta:
         db_table = 'respuestas'
         managed = False
-        unique_together = ['alumno', 'pregunta', 'seleccionado_alumno']
+        unique_together = [['alumno', 'pregunta', 'seleccionado_alumno']]
         verbose_name = 'Respuesta'
         verbose_name_plural = 'Respuestas'
     

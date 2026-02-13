@@ -1,3 +1,4 @@
+# core/serializers/pregunta.py
 from rest_framework import serializers
 from core.models import Pregunta, Opcion, Respuesta
 
@@ -10,12 +11,13 @@ class OpcionSerializer(serializers.ModelSerializer):
 
 class PreguntaSerializer(serializers.ModelSerializer):
     opciones = OpcionSerializer(many=True, read_only=True)
+    es_sociometrica = serializers.BooleanField(read_only=True)
     
     class Meta:
         model = Pregunta
         fields = [
             'id', 'texto', 'tipo', 'max_elecciones', 'orden',
-            'activa', 'descripcion', 'opciones', 'creado_en'
+            'activa', 'descripcion', 'es_sociometrica', 'opciones', 'creado_en'
         ]
         read_only_fields = ['id', 'creado_en']
 
@@ -24,19 +26,21 @@ class RespuestaSerializer(serializers.ModelSerializer):
     alumno_matricula = serializers.CharField(source='alumno.matricula', read_only=True)
     seleccionado_nombre = serializers.SerializerMethodField()
     pregunta_texto = serializers.CharField(source='pregunta.texto', read_only=True)
+    cuestionario_titulo = serializers.CharField(source='cuestionario.titulo', read_only=True)
     
     class Meta:
         model = Respuesta
         fields = [
-            'id', 'alumno', 'alumno_matricula', 'pregunta', 'pregunta_texto',
-            'opcion', 'texto_respuesta', 'seleccionado_alumno', 'seleccionado_nombre',
+            'id', 'alumno', 'alumno_matricula', 'cuestionario', 'cuestionario_titulo',
+            'pregunta', 'pregunta_texto', 'opcion', 'texto_respuesta', 
+            'seleccionado_alumno', 'seleccionado_nombre',
             'orden_eleccion', 'puntaje', 'creado_en', 'modificado_en'
         ]
         read_only_fields = ['id', 'creado_en', 'modificado_en']
     
     def get_seleccionado_nombre(self, obj):
         if obj.seleccionado_alumno:
-            return obj.seleccionado_alumno.nombre_completo
+            return obj.seleccionado_alumno.user.nombre_completo
         return None
 
 

@@ -1,3 +1,8 @@
+# core/serializers/__init__.py
+"""
+Exportación centralizada de serializers
+"""
+
 # Serializers de autenticación
 from .auth import (
     UserSerializer,
@@ -23,6 +28,18 @@ from .pregunta import (
     OpcionSerializer,
     RespuestaSerializer,
     RespuestaCreateSerializer
+)
+
+# Serializers de cuestionarios
+from .cuestionario import (
+    CuestionarioListSerializer,
+    CuestionarioDetailSerializer,
+    CuestionarioCreateSerializer,
+    CuestionarioUpdateSerializer,
+    CuestionarioPreguntaSerializer,
+    CuestionarioEstadoSerializer,
+    AgregarPreguntaSerializer,
+    ProgresoAlumnoSerializer,
 )
 
 # Serializers de docentes
@@ -65,6 +82,16 @@ __all__ = [
     'OpcionSerializer',
     'RespuestaSerializer',
     'RespuestaCreateSerializer',
+    
+    # Cuestionarios
+    'CuestionarioListSerializer',
+    'CuestionarioDetailSerializer',
+    'CuestionarioCreateSerializer',
+    'CuestionarioUpdateSerializer',
+    'CuestionarioPreguntaSerializer',
+    'CuestionarioEstadoSerializer',
+    'AgregarPreguntaSerializer',
+    'ProgresoAlumnoSerializer',
     
     # Catálogos
     'DivisionSerializer',
