@@ -15,8 +15,19 @@ class Pregunta(models.Model):
         ('TEXTO', 'Texto Libre'),
     ]
     
+    POLARIDAD_CHOICES = [
+        ('POSITIVA', 'Positiva'),
+        ('NEGATIVA', 'Negativa'),
+    ]
+    
     texto = models.CharField(max_length=255)
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
+    polaridad = models.CharField(
+        max_length=20, 
+        choices=POLARIDAD_CHOICES, 
+        default='POSITIVA',
+        help_text='Indica si la pregunta es positiva (¿Con quién harías equipo?) o negativa (¿Con quién NO trabajarías?)'
+    )
     max_elecciones = models.IntegerField(default=3)
     orden = models.IntegerField()
     activa = models.BooleanField(default=True)
