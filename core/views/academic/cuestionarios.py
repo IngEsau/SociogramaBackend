@@ -260,8 +260,10 @@ def estadisticas_cuestionario_view(request, cuestionario_id):
 def _calcular_nodos_sociograma(cuestionario, grupo):
     """
     Calcula nodos (alumnos) con clasificación sociométrica
+    Separa puntos positivos y negativos
     """
     from core.models import AlumnoGrupo
+    from django.db.models import Sum, Q
     
     # Obtener alumnos del grupo
     alumnos_grupo = AlumnoGrupo.objects.filter(
@@ -271,37 +273,75 @@ def _calcular_nodos_sociograma(cuestionario, grupo):
     
     total_alumnos = alumnos_grupo.count()
     
-    # Obtener preguntas sociométricas del cuestionario
-    preguntas_socio = cuestionario.preguntas.filter(
-        pregunta__tipo='SELECCION_ALUMNO'
+    # Obtener preguntas sociométricas del cuestionario separadas por polaridad
+    preguntas_positivas = cuestionario.preguntas.filter(
+        pregunta__tipo='SELECCION_ALUMNO',
+        pregunta__polaridad='POSITIVA'
+    ).values_list('pregunta_id', flat=True)
+    
+    preguntas_negativas = cuestionario.preguntas.filter(
+        pregunta__tipo='SELECCION_ALUMNO',
+        pregunta__polaridad='NEGATIVA'
     ).values_list('pregunta_id', flat=True)
     
     nodos = []
     respuestas_completas = 0
+    max_impacto = 0
     
+    # Primera pasada: calcular impacto máximo
     for ag in alumnos_grupo:
         alumno = ag.alumno
         
-        # Contar elecciones RECIBIDAS (cuántos lo eligieron)
+        # Puntos POSITIVOS recibidos
+        puntos_positivos = Respuesta.objects.filter(
+            cuestionario=cuestionario,
+            pregunta_id__in=preguntas_positivas,
+            seleccionado_alumno=alumno
+        ).aggregate(total=Sum('puntaje'))['total'] or 0
+        
+        # Puntos NEGATIVOS recibidos
+        puntos_negativos = Respuesta.objects.filter(
+            cuestionario=cuestionario,
+            pregunta_id__in=preguntas_negativas,
+            seleccionado_alumno=alumno
+        ).aggregate(total=Sum('puntaje'))['total'] or 0
+        
+        impacto_total = puntos_positivos + puntos_negativos
+        if impacto_total > max_impacto:
+            max_impacto = impacto_total
+    
+    # Segunda pasada: crear nodos con clasificación
+    for ag in alumnos_grupo:
+        alumno = ag.alumno
+        
+        # Puntos POSITIVOS recibidos
+        puntos_positivos = Respuesta.objects.filter(
+            cuestionario=cuestionario,
+            pregunta_id__in=preguntas_positivas,
+            seleccionado_alumno=alumno
+        ).aggregate(total=Sum('puntaje'))['total'] or 0
+        
+        # Puntos NEGATIVOS recibidos
+        puntos_negativos = Respuesta.objects.filter(
+            cuestionario=cuestionario,
+            pregunta_id__in=preguntas_negativas,
+            seleccionado_alumno=alumno
+        ).aggregate(total=Sum('puntaje'))['total'] or 0
+        
+        # Impacto total (tamaño del nodo)
+        impacto_total = puntos_positivos + puntos_negativos
+        
+        # Contar elecciones RECIBIDAS
         elecciones_recibidas = Respuesta.objects.filter(
             cuestionario=cuestionario,
-            pregunta_id__in=preguntas_socio,
+            pregunta_id__in=list(preguntas_positivas) + list(preguntas_negativas),
             seleccionado_alumno=alumno
         ).count()
         
-        # Sumar puntos recibidos
-        puntos_recibidos = Respuesta.objects.filter(
-            cuestionario=cuestionario,
-            pregunta_id__in=preguntas_socio,
-            seleccionado_alumno=alumno
-        ).aggregate(
-            total=Count('puntaje')
-        )['total'] or 0
-        
-        # Contar elecciones REALIZADAS (cuántos eligió)
+        # Contar elecciones REALIZADAS
         elecciones_realizadas = Respuesta.objects.filter(
             cuestionario=cuestionario,
-            pregunta_id__in=preguntas_socio,
+            pregunta_id__in=list(preguntas_positivas) + list(preguntas_negativas),
             alumno=alumno,
             seleccionado_alumno__isnull=False
         ).count()
@@ -316,15 +356,23 @@ def _calcular_nodos_sociograma(cuestionario, grupo):
         if estado and estado.estado == 'COMPLETADO':
             respuestas_completas += 1
         
-        # Clasificar alumno (ACEPTADO/RECHAZADO/INVISIBLE)
-        tipo = _clasificar_alumno(elecciones_recibidas, puntos_recibidos, total_alumnos)
+        # Clasificar alumno (ACEPTADO/RECHAZADO/INVISIBLE) según nueva lógica
+        tipo = _clasificar_alumno(
+            puntos_positivos, 
+            puntos_negativos, 
+            impacto_total, 
+            max_impacto
+        )
         
         nodos.append({
             'alumno_id': alumno.id,
             'matricula': alumno.matricula,
             'nombre': alumno.user.nombre_completo,
             'tipo': tipo,
-            'puntos_recibidos': puntos_recibidos,
+            'puntos_positivos': puntos_positivos,
+            'puntos_negativos': puntos_negativos,
+            'impacto_total': impacto_total,
+            'tamano': impacto_total,  # Para el frontend
             'elecciones_recibidas': elecciones_recibidas,
             'elecciones_realizadas': elecciones_realizadas,
             'completo': estado.estado == 'COMPLETADO' if estado else False
@@ -340,8 +388,10 @@ def _calcular_nodos_sociograma(cuestionario, grupo):
 def _calcular_conexiones_sociograma(cuestionario, grupo):
     """
     Calcula conexiones (quién eligió a quién) con pesos
+    Conexiones fuertes/débiles según % de votos mutuos (>=33%)
     """
     from core.models import AlumnoGrupo
+    from django.db.models import Count
     
     # IDs de alumnos del grupo
     alumnos_ids = AlumnoGrupo.objects.filter(
@@ -362,49 +412,102 @@ def _calcular_conexiones_sociograma(cuestionario, grupo):
         seleccionado_alumno_id__in=alumnos_ids
     ).select_related(
         'alumno', 'alumno__user',
-        'seleccionado_alumno', 'seleccionado_alumno__user'
+        'seleccionado_alumno', 'seleccionado_alumno__user',
+        'pregunta'
     )
     
-    conexiones = []
+    # Calcular total de puntos posibles en el grupo
+    total_puntos_posibles = 0
+    for pregunta_id in preguntas_socio:
+        from core.models import Pregunta
+        pregunta = Pregunta.objects.get(id=pregunta_id)
+        # Cada alumno puede dar max_elecciones * puntaje_máximo
+        total_puntos_posibles += len(alumnos_ids) * pregunta.max_elecciones * pregunta.max_elecciones
+    
+    # Agrupar respuestas por pares (origen, destino)
+    conexiones_dict = {}
     
     for resp in respuestas:
-        # Clasificar tipo de conexión según puntaje
-        if resp.puntaje >= 3:
+        key = (resp.alumno.id, resp.seleccionado_alumno.id)
+        
+        if key not in conexiones_dict:
+            conexiones_dict[key] = {
+                'origen_id': resp.alumno.id,
+                'origen_nombre': resp.alumno.user.nombre_completo,
+                'destino_id': resp.seleccionado_alumno.id,
+                'destino_nombre': resp.seleccionado_alumno.user.nombre_completo,
+                'peso_total': 0,
+                'conteo': 0,
+                'polaridad': resp.pregunta.polaridad
+            }
+        
+        conexiones_dict[key]['peso_total'] += resp.puntaje or 1
+        conexiones_dict[key]['conteo'] += 1
+    
+    # Calcular conexiones con tipo según % mutuo
+    conexiones = []
+    
+    for key, data in conexiones_dict.items():
+        origen_id, destino_id = key
+        
+        # Calcular puntos mutuos (bidireccionales)
+        key_inversa = (destino_id, origen_id)
+        
+        if key_inversa in conexiones_dict:
+            # Hay conexión mutua
+            puntos_mutuos = data['peso_total'] + conexiones_dict[key_inversa]['peso_total']
+        else:
+            # Solo unidireccional
+            puntos_mutuos = data['peso_total']
+        
+        # Calcular porcentaje del total
+        porcentaje_mutuo = (puntos_mutuos / total_puntos_posibles * 100) if total_puntos_posibles > 0 else 0
+        
+        # Clasificar tipo de conexión según % mutuo
+        if porcentaje_mutuo >= 33:
             tipo_conexion = 'fuerte'
-        elif resp.puntaje == 2:
-            tipo_conexion = 'media'
         else:
             tipo_conexion = 'debil'
         
         conexiones.append({
-            'origen_id': resp.alumno.id,
-            'origen_nombre': resp.alumno.user.nombre_completo,
-            'destino_id': resp.seleccionado_alumno.id,
-            'destino_nombre': resp.seleccionado_alumno.user.nombre_completo,
-            'peso': resp.puntaje or 1,
+            'origen_id': data['origen_id'],
+            'origen_nombre': data['origen_nombre'],
+            'destino_id': data['destino_id'],
+            'destino_nombre': data['destino_nombre'],
+            'peso': data['peso_total'],
             'tipo_conexion': tipo_conexion,
-            'orden_eleccion': resp.orden_eleccion
+            'porcentaje_mutuo': round(porcentaje_mutuo, 2),
+            'es_mutua': key_inversa in conexiones_dict,
+            'polaridad': data['polaridad']
         })
     
     return conexiones
 
 
-def _clasificar_alumno(elecciones_recibidas, puntos_recibidos, total_alumnos):
+def _clasificar_alumno(puntos_positivos, puntos_negativos, impacto_total, max_impacto):
     """
-    Clasifica al alumno según su popularidad sociométrica
+    Clasifica al alumno según su impacto sociométrico
     
-    ACEPTADO: Más del 30% del grupo lo eligió
-    RECHAZADO: Menos del 10% lo eligió PERO tiene elecciones
-    INVISIBLE: 0 elecciones recibidas
+    LÓGICA:
+    - INVISIBLE (gris): impacto_total <= 5% del máximo
+    - ACEPTADO (verde): puntos_positivos > puntos_negativos
+    - RECHAZADO (rojo): puntos_negativos > puntos_positivos
+    - Si son iguales: ACEPTADO (neutral positivo)
     """
-    if elecciones_recibidas == 0:
+    # Calcular 5% del impacto máximo
+    umbral_invisible = max_impacto * 0.05
+    
+    # Gris: Impacto muy bajo (<=5% del máximo)
+    if impacto_total <= umbral_invisible:
         return 'INVISIBLE'
     
-    porcentaje = (elecciones_recibidas / total_alumnos) * 100
-    
-    if porcentaje >= 30:
+    # Verde: Más positivos que negativos
+    if puntos_positivos > puntos_negativos:
         return 'ACEPTADO'
-    elif porcentaje < 10:
+    
+    # Rojo: Más negativos que positivos
+    if puntos_negativos > puntos_positivos:
         return 'RECHAZADO'
-    else:
-        return 'ACEPTADO'  # Neutral/Aceptado
+    
+    # Empate: consideramos neutral-positivo
+    return 'ACEPTADO'

@@ -251,6 +251,7 @@ def agregar_pregunta_view(request, cuestionario_id):
     {
         "texto": "¿Nueva pregunta?",
         "tipo": "SELECCION_ALUMNO",
+        "polaridad": "POSITIVA",  # ← NUEVO CAMPO
         "max_elecciones": 3,
         "descripcion": "Opcional"
     }
@@ -271,10 +272,11 @@ def agregar_pregunta_view(request, cuestionario_id):
     ).count()
     nuevo_orden = ultimo_orden + 1
     
-    # Crear pregunta
+    # Crear pregunta con polaridad
     pregunta = Pregunta.objects.create(
         texto=serializer.validated_data['texto'],
         tipo=serializer.validated_data['tipo'],
+        polaridad=serializer.validated_data.get('polaridad', 'POSITIVA'),
         max_elecciones=serializer.validated_data.get('max_elecciones', 3),
         descripcion=serializer.validated_data.get('descripcion', ''),
         orden=nuevo_orden,
@@ -296,7 +298,6 @@ def agregar_pregunta_view(request, cuestionario_id):
         'cuestionario_pregunta': response_serializer.data,
         'total_preguntas': cuestionario.total_preguntas
     }, status=status.HTTP_201_CREATED)
-
 
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])

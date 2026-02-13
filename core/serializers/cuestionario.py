@@ -2,6 +2,7 @@
 """
 Serializers para Sistema de Cuestionarios Sociométricos
 Las preguntas se crean INLINE con el cuestionario
+ACTUALIZADO: Soporte para polaridad de preguntas
 """
 from rest_framework import serializers
 from core.models import (
@@ -26,7 +27,7 @@ class PreguntaInlineSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Pregunta
-        fields = ['id', 'texto', 'tipo', 'max_elecciones', 'descripcion', 'es_sociometrica']
+        fields = ['id', 'texto', 'tipo', 'polaridad', 'max_elecciones', 'descripcion', 'es_sociometrica']
         read_only_fields = ['id']
 
 
@@ -110,6 +111,11 @@ class PreguntaCreateSerializer(serializers.Serializer):
         'OPCION', 
         'TEXTO'
     ])
+    polaridad = serializers.ChoiceField(
+        choices=['POSITIVA', 'NEGATIVA'],
+        default='POSITIVA',
+        help_text='Positiva: ¿Con quién harías equipo? | Negativa: ¿Con quién NO trabajarías?'
+    )
     max_elecciones = serializers.IntegerField(default=3, min_value=1, max_value=10)
     descripcion = serializers.CharField(required=False, allow_blank=True, max_length=500)
     
@@ -175,10 +181,11 @@ class CuestionarioCreateSerializer(serializers.ModelSerializer):
             
             # 2. Crear preguntas y asociarlas
             for orden, pregunta_data in enumerate(preguntas_data, start=1):
-                # Crear pregunta
+                # Crear pregunta con polaridad
                 pregunta = Pregunta.objects.create(
                     texto=pregunta_data['texto'],
                     tipo=pregunta_data['tipo'],
+                    polaridad=pregunta_data.get('polaridad', 'POSITIVA'),
                     max_elecciones=pregunta_data.get('max_elecciones', 3),
                     descripcion=pregunta_data.get('descripcion', ''),
                     orden=orden,
@@ -228,6 +235,10 @@ class AgregarPreguntaSerializer(serializers.Serializer):
     """Serializer para agregar una pregunta adicional al cuestionario"""
     texto = serializers.CharField(max_length=255)
     tipo = serializers.ChoiceField(choices=['SELECCION_ALUMNO', 'OPCION', 'TEXTO'])
+    polaridad = serializers.ChoiceField(
+        choices=['POSITIVA', 'NEGATIVA'],
+        default='POSITIVA'
+    )
     max_elecciones = serializers.IntegerField(default=3, min_value=1, max_value=10)
     descripcion = serializers.CharField(required=False, allow_blank=True, max_length=500)
     

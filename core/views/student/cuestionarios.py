@@ -247,6 +247,21 @@ def responder_cuestionario_view(request, cuestionario_id):
             'error': 'Este cuestionario no está disponible'
         }, status=status.HTTP_400_BAD_REQUEST)
     
+    # Verificar si ya completó el cuestionario
+    estado = CuestionarioEstado.objects.filter(
+        cuestionario=cuestionario,
+        alumno=alumno,
+        grupo=alumno_grupo.grupo
+    ).first()
+    
+    if estado and estado.estado == 'COMPLETADO':
+        return Response({
+            'error': 'Ya completaste este cuestionario',
+            'message': 'No puedes volver a responder un cuestionario completado',
+            'progreso': float(estado.progreso),
+            'fecha_completado': estado.fecha_completado
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
     respuestas_data = request.data.get('respuestas', [])
     
     if not respuestas_data:
@@ -377,12 +392,6 @@ def responder_cuestionario_view(request, cuestionario_id):
                 })
         
         # Actualizar progreso
-        estado = CuestionarioEstado.objects.filter(
-            cuestionario=cuestionario,
-            alumno=alumno,
-            grupo=alumno_grupo.grupo
-        ).first()
-        
         if estado:
             estado.actualizar_progreso()
     
