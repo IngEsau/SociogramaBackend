@@ -37,7 +37,7 @@ from .admin import (
 
 # Views académicas
 try:
-    from .academic import (
+    from .academic.academic import (
         my_groups_view,
     )
 except ImportError:

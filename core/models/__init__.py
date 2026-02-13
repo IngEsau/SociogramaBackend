@@ -31,6 +31,9 @@ from .groups import (
 from .surveys import (
     Pregunta,
     Opcion,
+    Cuestionario,
+    CuestionarioPregunta,
+    CuestionarioEstado,
     Respuesta,
 )
 
@@ -61,6 +64,9 @@ __all__ = [
     # Encuestas
     'Pregunta',
     'Opcion',
+    'Cuestionario',
+    'CuestionarioPregunta',
+    'CuestionarioEstado',
     'Respuesta',
     
     # Reportes
