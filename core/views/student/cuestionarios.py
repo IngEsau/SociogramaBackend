@@ -28,17 +28,10 @@ from core.utils.decorators import require_alumno
 def cuestionarios_disponibles_view(request):
     """
     Lista cuestionarios disponibles para el alumno
-    
     GET /api/student/cuestionarios/disponibles/
-    
-    Response:
-    {
-        "cuestionarios": [...]
-    }
     """
     alumno = request.alumno
     
-    # Obtener grupo activo del alumno en periodo activo
     alumno_grupo = AlumnoGrupo.objects.filter(
         alumno=alumno,
         activo=True,
@@ -52,15 +45,12 @@ def cuestionarios_disponibles_view(request):
             'message': 'No estás inscrito en ningún grupo activo'
         }, status=status.HTTP_200_OK)
     
-    # Cuestionarios activos del periodo
     cuestionarios = Cuestionario.objects.filter(
         periodo=alumno_grupo.grupo.periodo,
         activo=True
     ).select_related('periodo').order_by('-creado_en')
     
-    # Filtrar solo los que están en el rango de fechas
     cuestionarios_disponibles = [c for c in cuestionarios if c.esta_activo]
-    
     serializer = CuestionarioListSerializer(cuestionarios_disponibles, many=True)
     
     return Response({
@@ -78,7 +68,6 @@ def cuestionarios_disponibles_view(request):
 def detalle_cuestionario_alumno_view(request, cuestionario_id):
     """
     Detalle de un cuestionario específico
-    
     GET /api/student/cuestionarios/{id}/
     """
     cuestionario = get_object_or_404(
@@ -86,7 +75,6 @@ def detalle_cuestionario_alumno_view(request, cuestionario_id):
         id=cuestionario_id
     )
     
-    # Verificar acceso
     alumno_grupo = AlumnoGrupo.objects.filter(
         alumno=request.alumno,
         grupo__periodo=cuestionario.periodo,
@@ -94,20 +82,13 @@ def detalle_cuestionario_alumno_view(request, cuestionario_id):
     ).first()
     
     if not alumno_grupo:
-        return Response({
-            'error': 'No tienes acceso a este cuestionario'
-        }, status=status.HTTP_403_FORBIDDEN)
+        return Response({'error': 'No tienes acceso a este cuestionario'}, status=status.HTTP_403_FORBIDDEN)
     
     if not cuestionario.esta_activo:
-        return Response({
-            'error': 'Este cuestionario no está disponible en este momento'
-        }, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'Este cuestionario no está disponible en este momento'}, status=status.HTTP_400_BAD_REQUEST)
     
     serializer = CuestionarioDetailSerializer(cuestionario)
-    
-    return Response({
-        'cuestionario': serializer.data
-    }, status=status.HTTP_200_OK)
+    return Response({'cuestionario': serializer.data}, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])
@@ -116,21 +97,11 @@ def detalle_cuestionario_alumno_view(request, cuestionario_id):
 def preguntas_cuestionario_view(request, cuestionario_id):
     """
     Obtiene preguntas del cuestionario con compañeros para seleccionar
-    
     GET /api/student/cuestionarios/{id}/preguntas/
-    
-    Response:
-    {
-        "cuestionario_id": 1,
-        "cuestionario_titulo": "...",
-        "preguntas": [...],
-        "companeros": [...]  // Para preguntas tipo SELECCION_ALUMNO
-    }
     """
     alumno = request.alumno
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
     
-    # Verificar acceso
     alumno_grupo = AlumnoGrupo.objects.filter(
         alumno=alumno,
         grupo__periodo=cuestionario.periodo,
@@ -138,29 +109,19 @@ def preguntas_cuestionario_view(request, cuestionario_id):
     ).select_related('grupo').first()
     
     if not alumno_grupo:
-        return Response({
-            'error': 'No tienes acceso a este cuestionario'
-        }, status=status.HTTP_403_FORBIDDEN)
+        return Response({'error': 'No tienes acceso a este cuestionario'}, status=status.HTTP_403_FORBIDDEN)
     
     if not cuestionario.esta_activo:
-        return Response({
-            'error': 'Este cuestionario no está disponible'
-        }, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'Este cuestionario no está disponible'}, status=status.HTTP_400_BAD_REQUEST)
     
-    # Obtener preguntas ordenadas
     preguntas_cuestionario = cuestionario.preguntas.select_related('pregunta').order_by('orden')
     
     preguntas_data = []
     for cp in preguntas_cuestionario:
         pregunta = cp.pregunta
-        
-        # Verificar si ya respondió esta pregunta
         ya_respondio = Respuesta.objects.filter(
-            alumno=alumno,
-            cuestionario=cuestionario,
-            pregunta=pregunta
+            alumno=alumno, cuestionario=cuestionario, pregunta=pregunta
         ).exists()
-        
         preguntas_data.append({
             'id': pregunta.id,
             'texto': pregunta.texto,
@@ -171,13 +132,10 @@ def preguntas_cuestionario_view(request, cuestionario_id):
             'ya_respondida': ya_respondio
         })
     
-    # Obtener compañeros del grupo (excluyendo al alumno actual)
     companeros = AlumnoGrupo.objects.filter(
         grupo=alumno_grupo.grupo,
         activo=True
-    ).exclude(
-        alumno=alumno
-    ).select_related('alumno', 'alumno__user').order_by('alumno__user__nombre_completo')
+    ).exclude(alumno=alumno).select_related('alumno', 'alumno__user').order_by('alumno__user__nombre_completo')
     
     companeros_data = [
         {
@@ -203,25 +161,21 @@ def preguntas_cuestionario_view(request, cuestionario_id):
 @require_alumno
 def responder_cuestionario_view(request, cuestionario_id):
     """
-    Guarda respuestas del cuestionario
-    
+    Guarda respuestas del cuestionario.
+    Para preguntas SELECCION_ALUMNO se deben enviar EXACTAMENTE
+    max_elecciones selecciones — ni más ni menos.
+
     POST /api/student/cuestionarios/{id}/responder/
-    
+
     Body:
     {
         "respuestas": [
             {
-                "pregunta_id": 1,
+                "pregunta_id": 32,
                 "seleccionados": [
                     {"alumno_id": 5, "orden": 1},
                     {"alumno_id": 8, "orden": 2},
                     {"alumno_id": 12, "orden": 3}
-                ]
-            },
-            {
-                "pregunta_id": 2,
-                "seleccionados": [
-                    {"alumno_id": 5, "orden": 1}
                 ]
             }
         ]
@@ -230,7 +184,6 @@ def responder_cuestionario_view(request, cuestionario_id):
     alumno = request.alumno
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
     
-    # Verificar acceso y grupo
     alumno_grupo = AlumnoGrupo.objects.filter(
         alumno=alumno,
         grupo__periodo=cuestionario.periodo,
@@ -238,16 +191,11 @@ def responder_cuestionario_view(request, cuestionario_id):
     ).select_related('grupo').first()
     
     if not alumno_grupo:
-        return Response({
-            'error': 'No tienes acceso a este cuestionario'
-        }, status=status.HTTP_403_FORBIDDEN)
+        return Response({'error': 'No tienes acceso a este cuestionario'}, status=status.HTTP_403_FORBIDDEN)
     
     if not cuestionario.esta_activo:
-        return Response({
-            'error': 'Este cuestionario no está disponible'
-        }, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'Este cuestionario no está disponible'}, status=status.HTTP_400_BAD_REQUEST)
     
-    # Verificar si ya completó el cuestionario
     estado = CuestionarioEstado.objects.filter(
         cuestionario=cuestionario,
         alumno=alumno,
@@ -265,22 +213,17 @@ def responder_cuestionario_view(request, cuestionario_id):
     respuestas_data = request.data.get('respuestas', [])
     
     if not respuestas_data:
-        return Response({
-            'error': 'No se enviaron respuestas'
-        }, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'No se enviaron respuestas'}, status=status.HTTP_400_BAD_REQUEST)
     
-    # Procesar respuestas
     with transaction.atomic():
         respuestas_creadas = []
         errores = []
         
         for idx, resp_data in enumerate(respuestas_data):
             try:
-                # Validar pregunta
                 pregunta_id = resp_data.get('pregunta_id')
                 pregunta = get_object_or_404(Pregunta, id=pregunta_id)
                 
-                # Verificar que pertenece al cuestionario
                 if not cuestionario.preguntas.filter(pregunta=pregunta).exists():
                     errores.append({
                         'pregunta_id': pregunta_id,
@@ -295,30 +238,34 @@ def responder_cuestionario_view(request, cuestionario_id):
                     pregunta=pregunta
                 ).delete()
                 
-                # Procesar según tipo
                 if pregunta.tipo == 'SELECCION_ALUMNO':
                     seleccionados = resp_data.get('seleccionados', [])
-                    
-                    if not seleccionados:
+                    # El alumno debe seleccionar exactamente max_elecciones
+                    # compañeros — ni más ni menos.
+                    if len(seleccionados) != pregunta.max_elecciones:
                         errores.append({
                             'pregunta_id': pregunta_id,
-                            'error': 'Debe seleccionar al menos un compañero'
+                            'error': (
+                                f'Debes seleccionar exactamente {pregunta.max_elecciones} '
+                                f'compañero(s) para esta pregunta. '
+                                f'Enviaste {len(seleccionados)}.'
+                            )
                         })
                         continue
                     
-                    if len(seleccionados) > pregunta.max_elecciones:
+                    # No puede haber dos seleccionados con el mismo orden.
+                    ordenes = [sel.get('orden') for sel in seleccionados]
+                    if len(ordenes) != len(set(ordenes)):
                         errores.append({
                             'pregunta_id': pregunta_id,
-                            'error': f'Máximo {pregunta.max_elecciones} selecciones'
+                            'error': 'No puedes asignar el mismo orden a dos compañeros distintos.'
                         })
                         continue
                     
-                    # Crear respuestas
                     for sel in seleccionados:
                         alumno_seleccionado_id = sel.get('alumno_id')
                         orden = sel.get('orden', 1)
                         
-                        # Verificar que el seleccionado sea del mismo grupo
                         es_del_grupo = AlumnoGrupo.objects.filter(
                             alumno_id=alumno_seleccionado_id,
                             grupo=alumno_grupo.grupo,
@@ -333,7 +280,6 @@ def responder_cuestionario_view(request, cuestionario_id):
                             })
                             continue
                         
-                        # Calcular puntaje
                         puntaje = max(1, pregunta.max_elecciones - orden + 1)
                         
                         respuesta = Respuesta.objects.create(
@@ -344,45 +290,28 @@ def responder_cuestionario_view(request, cuestionario_id):
                             orden_eleccion=orden,
                             puntaje=puntaje
                         )
-                        
                         respuestas_creadas.append(respuesta.id)
                 
                 elif pregunta.tipo == 'OPCION':
                     opcion_id = resp_data.get('opcion_id')
-                    
                     if not opcion_id:
-                        errores.append({
-                            'pregunta_id': pregunta_id,
-                            'error': 'Debe seleccionar una opción'
-                        })
+                        errores.append({'pregunta_id': pregunta_id, 'error': 'Debe seleccionar una opción'})
                         continue
-                    
                     respuesta = Respuesta.objects.create(
-                        alumno=alumno,
-                        cuestionario=cuestionario,
-                        pregunta=pregunta,
-                        opcion_id=opcion_id
+                        alumno=alumno, cuestionario=cuestionario,
+                        pregunta=pregunta, opcion_id=opcion_id
                     )
-                    
                     respuestas_creadas.append(respuesta.id)
                 
                 elif pregunta.tipo == 'TEXTO':
                     texto = resp_data.get('texto_respuesta', '').strip()
-                    
                     if not texto:
-                        errores.append({
-                            'pregunta_id': pregunta_id,
-                            'error': 'Debe proporcionar una respuesta'
-                        })
+                        errores.append({'pregunta_id': pregunta_id, 'error': 'Debe proporcionar una respuesta'})
                         continue
-                    
                     respuesta = Respuesta.objects.create(
-                        alumno=alumno,
-                        cuestionario=cuestionario,
-                        pregunta=pregunta,
-                        texto_respuesta=texto
+                        alumno=alumno, cuestionario=cuestionario,
+                        pregunta=pregunta, texto_respuesta=texto
                     )
-                    
                     respuestas_creadas.append(respuesta.id)
             
             except Exception as e:
@@ -391,7 +320,6 @@ def responder_cuestionario_view(request, cuestionario_id):
                     'error': str(e)
                 })
         
-        # Actualizar progreso
         if estado:
             estado.actualizar_progreso()
     
@@ -409,27 +337,11 @@ def responder_cuestionario_view(request, cuestionario_id):
 def mi_progreso_view(request, cuestionario_id):
     """
     Ver progreso personal en el cuestionario
-    
     GET /api/student/cuestionarios/{id}/mi-progreso/
-    
-    Response:
-    {
-        "cuestionario_id": 1,
-        "cuestionario_titulo": "...",
-        "grupo_id": 1,
-        "grupo_clave": "1A",
-        "total_preguntas": 3,
-        "preguntas_respondidas": 2,
-        "progreso": 66.67,
-        "estado": "EN_PROGRESO",
-        "fecha_inicio": "...",
-        "fecha_completado": null
-    }
     """
     alumno = request.alumno
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
     
-    # Obtener grupo del alumno
     alumno_grupo = AlumnoGrupo.objects.filter(
         alumno=alumno,
         grupo__periodo=cuestionario.periodo,
@@ -437,11 +349,8 @@ def mi_progreso_view(request, cuestionario_id):
     ).select_related('grupo').first()
     
     if not alumno_grupo:
-        return Response({
-            'error': 'No tienes acceso a este cuestionario'
-        }, status=status.HTTP_403_FORBIDDEN)
+        return Response({'error': 'No tienes acceso a este cuestionario'}, status=status.HTTP_403_FORBIDDEN)
     
-    # Obtener estado
     estado = CuestionarioEstado.objects.filter(
         cuestionario=cuestionario,
         alumno=alumno,
@@ -449,11 +358,8 @@ def mi_progreso_view(request, cuestionario_id):
     ).first()
     
     if not estado:
-        return Response({
-            'error': 'No se encontró tu registro de progreso'
-        }, status=status.HTTP_404_NOT_FOUND)
+        return Response({'error': 'No se encontró tu registro de progreso'}, status=status.HTTP_404_NOT_FOUND)
     
-    # Contar preguntas respondidas
     total_preguntas = cuestionario.total_preguntas
     preguntas_respondidas = Respuesta.objects.filter(
         alumno=alumno,
