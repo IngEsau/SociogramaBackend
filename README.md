@@ -389,4 +389,4 @@ python manage.py test
 
 Proyecto académico - Universidad Tecnológica de Puebla
 
-**Última actualización:** 02/03/2026
+**Última actualización:** 02/20/2026
