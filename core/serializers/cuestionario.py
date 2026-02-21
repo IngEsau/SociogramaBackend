@@ -1,8 +1,10 @@
 # core/serializers/cuestionario.py
 """
 Serializers para Sistema de Cuestionarios Sociométricos
-Las preguntas se crean INLINE con el cuestionario
-ACTUALIZADO: Soporte para polaridad de preguntas
+ACTUALIZADO Fase 2: CuestionarioCreateSerializer soporta Opción C
+- preguntas_ids: reutilizar preguntas existentes del banco
+- preguntas: crear preguntas nuevas inline
+- Ambos campos son opcionales pero debe venir al menos uno
 """
 from rest_framework import serializers
 from core.models import (
@@ -100,11 +102,32 @@ class CuestionarioEstadoSerializer(serializers.ModelSerializer):
 
 
 # ============================================
+# HELPER — clonar pregunta del banco
+# ============================================
+
+def _clonar_pregunta(pregunta, orden):
+    """
+    Crea una copia independiente de una pregunta del banco.
+    El cuestionario apunta a la copia, no al original.
+    Así el banco queda libre para editar o eliminar sin afectar cuestionarios.
+    """
+    return Pregunta.objects.create(
+        texto=pregunta.texto,
+        tipo=pregunta.tipo,
+        polaridad=pregunta.polaridad,
+        max_elecciones=pregunta.max_elecciones,
+        descripcion=pregunta.descripcion,
+        orden=orden,
+        activa=True
+    )
+
+
+# ============================================
 # SERIALIZERS DE ESCRITURA
 # ============================================
 
 class PreguntaCreateSerializer(serializers.Serializer):
-    """Serializer para crear preguntas inline"""
+    """Serializer para crear preguntas nuevas inline al crear un cuestionario"""
     texto = serializers.CharField(max_length=255)
     tipo = serializers.ChoiceField(choices=[
         'SELECCION_ALUMNO',
@@ -126,30 +149,88 @@ class PreguntaCreateSerializer(serializers.Serializer):
 
 
 class CuestionarioCreateSerializer(serializers.ModelSerializer):
-    """Serializer para crear cuestionario con preguntas inline"""
+    """
+    Serializer para crear cuestionario — Opción C.
+
+    Acepta preguntas existentes del banco, preguntas nuevas inline, o ambas.
+    Al menos uno de los dos campos debe venir con datos.
+
+    Ejemplo body:
+    {
+        "titulo": "Cuestionario Feb 2026",
+        "periodo": 1,
+        "fecha_inicio": "2026-02-15T08:00:00Z",
+        "fecha_fin": "2026-02-20T23:59:59Z",
+        "activo": false,
+        "preguntas_ids": [1, 2, 3],         <- existentes del banco (opcional)
+        "preguntas": [                        <- nuevas inline (opcional)
+            {
+                "texto": "¿Con quién trabajarías?",
+                "tipo": "SELECCION_ALUMNO",
+                "polaridad": "POSITIVA",
+                "max_elecciones": 3
+            }
+        ]
+    }
+    """
+    # Preguntas existentes del banco (por ID)
+    preguntas_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+        help_text="IDs de preguntas existentes del banco a reutilizar"
+    )
+
+    # Preguntas nuevas inline
     preguntas = serializers.ListField(
         child=PreguntaCreateSerializer(),
         write_only=True,
-        min_length=1,
-        help_text="Array de preguntas a crear con el cuestionario"
+        required=False,
+        allow_empty=True,
+        help_text="Preguntas nuevas a crear e incorporar al cuestionario"
     )
-    
+
     class Meta:
         model = Cuestionario
         fields = [
             'titulo', 'descripcion', 'periodo', 'fecha_inicio', 
-            'fecha_fin', 'activo', 'preguntas'
+            'fecha_fin', 'activo', 'preguntas_ids', 'preguntas'
         ]
-    
+
+    def validate_preguntas_ids(self, value):
+        """Verificar que todos los IDs existan y estén activos en el banco"""
+        if not value:
+            return value
+
+        ids_encontrados = set(
+            Pregunta.objects.filter(id__in=value, activa=True)
+            .values_list('id', flat=True)
+        )
+
+        ids_invalidos = set(value) - ids_encontrados
+        if ids_invalidos:
+            raise serializers.ValidationError(
+                f'Las siguientes preguntas no existen o están inactivas: {sorted(ids_invalidos)}'
+            )
+
+        # Verificar que no haya IDs duplicados en la lista
+        if len(value) != len(set(value)):
+            raise serializers.ValidationError(
+                'No puede repetir el mismo ID de pregunta.'
+            )
+
+        return value
+
     def validate(self, data):
-        """Validaciones"""
+        """Validaciones globales"""
         # Validar fechas
         if data['fecha_inicio'] >= data['fecha_fin']:
             raise serializers.ValidationError({
                 'fecha_fin': 'La fecha de fin debe ser posterior a la fecha de inicio'
             })
-        
-        # Validar periodo
+
+        # Validar periodo activo
         try:
             periodo = Periodo.objects.get(id=data['periodo'].id)
             if not periodo.activo:
@@ -160,45 +241,67 @@ class CuestionarioCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'periodo': 'El periodo seleccionado no existe'
             })
-        
-        # Validar que al menos haya una pregunta
-        if not data.get('preguntas'):
+
+        # Validar que venga al menos una pregunta (existente o nueva)
+        tiene_ids = bool(data.get('preguntas_ids'))
+        tiene_nuevas = bool(data.get('preguntas'))
+
+        if not tiene_ids and not tiene_nuevas:
             raise serializers.ValidationError({
-                'preguntas': 'Debe incluir al menos una pregunta'
+                'preguntas': 'Debe incluir al menos una pregunta (existente o nueva).'
             })
-        
+
         return data
-    
+
     def create(self, validated_data):
-        """Crear cuestionario con sus preguntas"""
+        """
+        Crear cuestionario con sus preguntas.
+        - Preguntas del banco: se CLONAN (copia independiente)
+        - Preguntas nuevas inline: se crean directamente
+        Orden: primero las del banco, luego las nuevas.
+        """
         from django.db import transaction
-        
-        preguntas_data = validated_data.pop('preguntas')
-        
+
+        preguntas_ids = validated_data.pop('preguntas_ids', [])
+        preguntas_nuevas_data = validated_data.pop('preguntas', [])
+
         with transaction.atomic():
-            # 1. Crear cuestionario
             cuestionario = Cuestionario.objects.create(**validated_data)
-            
-            # 2. Crear preguntas y asociarlas
-            for orden, pregunta_data in enumerate(preguntas_data, start=1):
-                # Crear pregunta con polaridad
+
+            orden_actual = 1
+
+            # Clonar preguntas existentes del banco
+            if preguntas_ids:
+                preguntas_banco = {
+                    p.id: p for p in Pregunta.objects.filter(id__in=preguntas_ids)
+                }
+                for pregunta_id in preguntas_ids:
+                    copia = _clonar_pregunta(preguntas_banco[pregunta_id], orden_actual)
+                    CuestionarioPregunta.objects.create(
+                        cuestionario=cuestionario,
+                        pregunta=copia,
+                        orden=orden_actual
+                    )
+                    orden_actual += 1
+
+            # Crear preguntas nuevas inline
+            for pregunta_data in preguntas_nuevas_data:
                 pregunta = Pregunta.objects.create(
                     texto=pregunta_data['texto'],
                     tipo=pregunta_data['tipo'],
                     polaridad=pregunta_data.get('polaridad', 'POSITIVA'),
                     max_elecciones=pregunta_data.get('max_elecciones', 3),
                     descripcion=pregunta_data.get('descripcion', ''),
-                    orden=orden,
+                    orden=orden_actual,
                     activa=True
                 )
-                
-                # Asociar pregunta con cuestionario
                 CuestionarioPregunta.objects.create(
                     cuestionario=cuestionario,
                     pregunta=pregunta,
-                    orden=orden
+                    orden=orden_actual
                 )
-        
+                orden_actual += 1
+
         return cuestionario
 
 
@@ -210,7 +313,6 @@ class CuestionarioUpdateSerializer(serializers.ModelSerializer):
         fields = ['titulo', 'descripcion', 'fecha_inicio', 'fecha_fin', 'activo']
     
     def validate(self, data):
-        """Validaciones"""
         instance = self.instance
         
         fecha_inicio = data.get('fecha_inicio', instance.fecha_inicio)
@@ -221,7 +323,6 @@ class CuestionarioUpdateSerializer(serializers.ModelSerializer):
                 'fecha_fin': 'La fecha de fin debe ser posterior a la fecha de inicio'
             })
         
-        # No permitir desactivar si ya tiene respuestas
         if 'activo' in data and not data['activo']:
             if instance.total_respuestas > 0:
                 raise serializers.ValidationError({
@@ -232,7 +333,7 @@ class CuestionarioUpdateSerializer(serializers.ModelSerializer):
 
 
 class AgregarPreguntaSerializer(serializers.Serializer):
-    """Serializer para agregar una pregunta adicional al cuestionario"""
+    """Serializer para agregar una pregunta nueva adicional al cuestionario"""
     texto = serializers.CharField(max_length=255)
     tipo = serializers.ChoiceField(choices=['SELECCION_ALUMNO', 'OPCION', 'TEXTO'])
     polaridad = serializers.ChoiceField(
@@ -266,11 +367,9 @@ class RespuestaCreateSerializer(serializers.Serializer):
     )
     
     def validate(self, data):
-        """Validaciones"""
         cuestionario_id = data.get('cuestionario_id')
         pregunta_id = data.get('pregunta_id')
         
-        # Validar cuestionario
         try:
             cuestionario = Cuestionario.objects.get(id=cuestionario_id)
             if not cuestionario.esta_activo:
@@ -282,7 +381,6 @@ class RespuestaCreateSerializer(serializers.Serializer):
                 'cuestionario_id': 'El cuestionario no existe'
             })
         
-        # Validar pregunta
         try:
             pregunta = Pregunta.objects.get(id=pregunta_id)
         except Pregunta.DoesNotExist:
@@ -298,19 +396,15 @@ class RespuestaCreateSerializer(serializers.Serializer):
                 'pregunta_id': 'Esta pregunta no pertenece al cuestionario'
             })
         
-        # Validar según tipo de pregunta
         if pregunta.tipo == 'SELECCION_ALUMNO':
             if 'seleccionados' not in data or not data['seleccionados']:
                 raise serializers.ValidationError({
                     'seleccionados': 'Debe seleccionar al menos un compañero'
                 })
-            
             if len(data['seleccionados']) > pregunta.max_elecciones:
                 raise serializers.ValidationError({
                     'seleccionados': f'Máximo {pregunta.max_elecciones} compañeros permitidos'
                 })
-            
-            # Validar que no se repitan
             alumnos_ids = [s['alumno_id'] for s in data['seleccionados']]
             if len(alumnos_ids) != len(set(alumnos_ids)):
                 raise serializers.ValidationError({

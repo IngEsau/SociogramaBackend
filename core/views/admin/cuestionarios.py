@@ -2,6 +2,7 @@
 """
 Endpoints para gestión de cuestionarios (Admin)
 REFACTORIZADO: Cuestionarios por PERIODO
+ACTUALIZADO Fase 3: asociar_pregunta_view — asociar pregunta existente del banco
 """
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -20,6 +21,7 @@ from core.serializers import (
     CuestionarioCreateSerializer,
     CuestionarioUpdateSerializer,
     AgregarPreguntaSerializer,
+    CuestionarioPreguntaSerializer,
 )
 from core.utils.decorators import require_admin
 
@@ -30,9 +32,9 @@ from core.utils.decorators import require_admin
 def crear_cuestionario_view(request):
     """
     Crea un nuevo cuestionario para un periodo
-    
+
     POST /api/admin/cuestionarios/crear/
-    
+
     Body:
     {
         "titulo": "Cuestionario Sociométrico Febrero 2026",
@@ -41,7 +43,8 @@ def crear_cuestionario_view(request):
         "fecha_inicio": "2026-02-15T08:00:00Z",
         "fecha_fin": "2026-02-20T23:59:59Z",
         "activo": false,
-        "preguntas_ids": [1, 2, 3]
+        "preguntas_ids": [1, 2, 3],
+        "preguntas": [...]
     }
     """
     serializer = CuestionarioCreateSerializer(data=request.data)
@@ -68,16 +71,15 @@ def crear_cuestionario_view(request):
 def listar_cuestionarios_view(request):
     """
     Lista todos los cuestionarios
-    
+
     GET /api/admin/cuestionarios/
-    
+
     Query params:
     - periodo: ID del periodo (opcional)
     - activo: true/false (opcional)
     """
     cuestionarios = Cuestionario.objects.select_related('periodo').all()
     
-    # Filtros
     periodo_id = request.query_params.get('periodo')
     activo = request.query_params.get('activo')
     
@@ -102,7 +104,7 @@ def listar_cuestionarios_view(request):
 def detalle_cuestionario_view(request, cuestionario_id):
     """
     Detalle completo de un cuestionario
-    
+
     GET /api/admin/cuestionarios/{id}/
     """
     cuestionario = get_object_or_404(
@@ -123,7 +125,7 @@ def detalle_cuestionario_view(request, cuestionario_id):
 def actualizar_cuestionario_view(request, cuestionario_id):
     """
     Actualiza un cuestionario
-    
+
     PUT /api/admin/cuestionarios/{id}/actualizar/
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
@@ -151,7 +153,7 @@ def actualizar_cuestionario_view(request, cuestionario_id):
 def eliminar_cuestionario_view(request, cuestionario_id):
     """
     Elimina un cuestionario
-    
+
     DELETE /api/admin/cuestionarios/{id}/eliminar/
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
@@ -179,12 +181,11 @@ def activar_cuestionario_view(request, cuestionario_id):
     """
     Activa un cuestionario y crea estados para todos los alumnos del periodo.
     Desactiva automáticamente otros cuestionarios activos del mismo periodo.
-    
+
     POST /api/admin/cuestionarios/{id}/activar/
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
     
-    # Validar que tenga preguntas
     if cuestionario.total_preguntas == 0:
         return Response({
             'success': False,
@@ -192,17 +193,14 @@ def activar_cuestionario_view(request, cuestionario_id):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     with transaction.atomic():
-        # Desactivar otros cuestionarios del mismo periodo
         cuestionarios_desactivados = Cuestionario.objects.filter(
             periodo=cuestionario.periodo,
             activo=True
         ).exclude(id=cuestionario_id).update(activo=False)
         
-        # Activar este cuestionario
         cuestionario.activo = True
         cuestionario.save()
         
-        # Crear estados para TODOS los grupos del periodo
         estados_creados = _crear_estados_para_periodo(cuestionario)
     
     serializer = CuestionarioDetailSerializer(cuestionario)
@@ -222,7 +220,7 @@ def activar_cuestionario_view(request, cuestionario_id):
 def desactivar_cuestionario_view(request, cuestionario_id):
     """
     Desactiva un cuestionario
-    
+
     POST /api/admin/cuestionarios/{id}/desactivar/
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
@@ -243,15 +241,16 @@ def desactivar_cuestionario_view(request, cuestionario_id):
 @require_admin
 def agregar_pregunta_view(request, cuestionario_id):
     """
-    Agrega una nueva pregunta a un cuestionario existente
-    
+    Agrega una pregunta NUEVA a un cuestionario existente.
+    La pregunta se crea en el banco y se asocia al cuestionario.
+
     POST /api/admin/cuestionarios/{id}/agregar-pregunta/
-    
+
     Body:
     {
         "texto": "¿Nueva pregunta?",
         "tipo": "SELECCION_ALUMNO",
-        "polaridad": "POSITIVA",  # ← NUEVO CAMPO
+        "polaridad": "POSITIVA",
         "max_elecciones": 3,
         "descripcion": "Opcional"
     }
@@ -266,13 +265,11 @@ def agregar_pregunta_view(request, cuestionario_id):
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    # Determinar orden
     ultimo_orden = CuestionarioPregunta.objects.filter(
         cuestionario=cuestionario
     ).count()
     nuevo_orden = ultimo_orden + 1
     
-    # Crear pregunta con polaridad
     pregunta = Pregunta.objects.create(
         texto=serializer.validated_data['texto'],
         tipo=serializer.validated_data['tipo'],
@@ -283,14 +280,12 @@ def agregar_pregunta_view(request, cuestionario_id):
         activa=True
     )
     
-    # Asociar con cuestionario
     cuestionario_pregunta = CuestionarioPregunta.objects.create(
         cuestionario=cuestionario,
         pregunta=pregunta,
         orden=nuevo_orden
     )
     
-    from core.serializers import CuestionarioPreguntaSerializer
     response_serializer = CuestionarioPreguntaSerializer(cuestionario_pregunta)
     
     return Response({
@@ -299,13 +294,68 @@ def agregar_pregunta_view(request, cuestionario_id):
         'total_preguntas': cuestionario.total_preguntas
     }, status=status.HTTP_201_CREATED)
 
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@require_admin
+def asociar_pregunta_view(request, cuestionario_id):
+    """
+    Asocia una pregunta EXISTENTE del banco a un cuestionario.
+    Se crea una COPIA de la pregunta — el original del banco queda intacto
+    y puede eliminarse o editarse sin afectar el cuestionario.
+
+    POST /api/admin/cuestionarios/{id}/asociar-pregunta/
+
+    Body:
+    {
+        "pregunta_id": 5
+    }
+    """
+    cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
+
+    pregunta_id = request.data.get('pregunta_id')
+
+    if not pregunta_id:
+        return Response({
+            'success': False,
+            'error': 'El campo pregunta_id es requerido.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    # Verificar que la pregunta exista y esté activa
+    pregunta_banco = get_object_or_404(Pregunta, id=pregunta_id, activa=True)
+
+    # Determinar orden
+    ultimo_orden = CuestionarioPregunta.objects.filter(
+        cuestionario=cuestionario
+    ).count()
+    nuevo_orden = ultimo_orden + 1
+
+    # Clonar la pregunta del banco
+    from core.serializers.cuestionario import _clonar_pregunta
+    copia = _clonar_pregunta(pregunta_banco, nuevo_orden)
+
+    cuestionario_pregunta = CuestionarioPregunta.objects.create(
+        cuestionario=cuestionario,
+        pregunta=copia,
+        orden=nuevo_orden
+    )
+
+    response_serializer = CuestionarioPreguntaSerializer(cuestionario_pregunta)
+
+    return Response({
+        'success': True,
+        'cuestionario_pregunta': response_serializer.data,
+        'total_preguntas': cuestionario.total_preguntas
+    }, status=status.HTTP_201_CREATED)
+
+
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 @require_admin
 def remover_pregunta_view(request, cuestionario_id, pregunta_id):
     """
     Remueve una pregunta de un cuestionario
-    
+
     DELETE /api/admin/cuestionarios/{id}/remover-pregunta/{pregunta_id}/
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
@@ -316,7 +366,6 @@ def remover_pregunta_view(request, cuestionario_id, pregunta_id):
         pregunta_id=pregunta_id
     )
     
-    # Verificar si tiene respuestas
     from core.models import Respuesta
     respuestas_count = Respuesta.objects.filter(
         cuestionario=cuestionario,
@@ -357,7 +406,6 @@ def _crear_estados_para_periodo(cuestionario):
     """
     Crea estados para todos los alumnos activos de todos los grupos del periodo
     """
-    # Obtener todos los grupos activos del periodo
     grupos = Grupo.objects.filter(
         periodo=cuestionario.periodo,
         activo=True
@@ -367,7 +415,6 @@ def _crear_estados_para_periodo(cuestionario):
     grupos_count = 0
     
     for grupo in grupos:
-        # Obtener alumnos activos del grupo
         alumnos_grupo = AlumnoGrupo.objects.filter(
             grupo=grupo,
             activo=True
@@ -377,7 +424,6 @@ def _crear_estados_para_periodo(cuestionario):
             grupos_count += 1
             
             for ag in alumnos_grupo:
-                # Crear estado solo si no existe
                 estado, created = CuestionarioEstado.objects.get_or_create(
                     cuestionario=cuestionario,
                     alumno=ag.alumno,

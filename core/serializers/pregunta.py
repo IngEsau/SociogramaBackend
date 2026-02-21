@@ -1,6 +1,11 @@
 # core/serializers/pregunta.py
+"""
+Serializers para Pregunta, Opcion y Respuesta
+ACTUALIZADO: polaridad en PreguntaSerializer, soporte escritura para banco de preguntas
+"""
 from rest_framework import serializers
 from core.models import Pregunta, Opcion, Respuesta
+
 
 class OpcionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -10,16 +15,44 @@ class OpcionSerializer(serializers.ModelSerializer):
 
 
 class PreguntaSerializer(serializers.ModelSerializer):
+    """
+    Serializer completo para el banco de preguntas.
+    Soporta lectura y escritura.
+    """
     opciones = OpcionSerializer(many=True, read_only=True)
     es_sociometrica = serializers.BooleanField(read_only=True)
-    
+
     class Meta:
         model = Pregunta
         fields = [
-            'id', 'texto', 'tipo', 'max_elecciones', 'orden',
+            'id', 'texto', 'tipo', 'polaridad', 'max_elecciones', 'orden',
             'activa', 'descripcion', 'es_sociometrica', 'opciones', 'creado_en'
         ]
         read_only_fields = ['id', 'creado_en']
+
+    def validate_texto(self, value):
+        if len(value.strip()) < 10:
+            raise serializers.ValidationError(
+                'La pregunta debe tener al menos 10 caracteres.'
+            )
+        return value.strip()
+
+    def validate_orden(self, value):
+        if value < 1:
+            raise serializers.ValidationError(
+                'El orden debe ser un número positivo.'
+            )
+        return value
+
+    def validate(self, data):
+        # max_elecciones solo aplica a SELECCION_ALUMNO
+        tipo = data.get('tipo', getattr(self.instance, 'tipo', None))
+        max_elecciones = data.get('max_elecciones', None)
+
+        if tipo != 'SELECCION_ALUMNO' and max_elecciones is not None:
+            data['max_elecciones'] = None
+
+        return data
 
 
 class RespuestaSerializer(serializers.ModelSerializer):
@@ -27,17 +60,17 @@ class RespuestaSerializer(serializers.ModelSerializer):
     seleccionado_nombre = serializers.SerializerMethodField()
     pregunta_texto = serializers.CharField(source='pregunta.texto', read_only=True)
     cuestionario_titulo = serializers.CharField(source='cuestionario.titulo', read_only=True)
-    
+
     class Meta:
         model = Respuesta
         fields = [
             'id', 'alumno', 'alumno_matricula', 'cuestionario', 'cuestionario_titulo',
-            'pregunta', 'pregunta_texto', 'opcion', 'texto_respuesta', 
+            'pregunta', 'pregunta_texto', 'opcion', 'texto_respuesta',
             'seleccionado_alumno', 'seleccionado_nombre',
             'orden_eleccion', 'puntaje', 'creado_en', 'modificado_en'
         ]
         read_only_fields = ['id', 'creado_en', 'modificado_en']
-    
+
     def get_seleccionado_nombre(self, obj):
         if obj.seleccionado_alumno:
             return obj.seleccionado_alumno.user.nombre_completo

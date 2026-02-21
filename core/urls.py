@@ -34,6 +34,16 @@ from .views.admin.cuestionarios import (
     desactivar_cuestionario_view,
     agregar_pregunta_view,
     remover_pregunta_view,
+    asociar_pregunta_view,
+)
+
+# Importar views de preguntas admin
+from .views.admin.preguntas import (
+    listar_preguntas_view,
+    crear_pregunta_view,
+    detalle_pregunta_view,
+    actualizar_pregunta_view,
+    eliminar_pregunta_view,
 )
 
 # Importar views de cuestionarios tutores
@@ -118,7 +128,17 @@ urlpatterns = [
     path('admin/cuestionarios/<int:cuestionario_id>/desactivar/', desactivar_cuestionario_view, name='desactivar_cuestionario'),
     path('admin/cuestionarios/<int:cuestionario_id>/agregar-pregunta/', agregar_pregunta_view, name='agregar_pregunta'),
     path('admin/cuestionarios/<int:cuestionario_id>/remover-pregunta/<int:pregunta_id>/', remover_pregunta_view, name='remover_pregunta'),
+    path('admin/cuestionarios/<int:cuestionario_id>/asociar-pregunta/', asociar_pregunta_view, name='asociar_pregunta'),
 
+    # ========================================
+    # ADMINISTRACIÓN - BANCO DE PREGUNTAS
+    # ========================================
+    path('admin/preguntas/', listar_preguntas_view, name='listar_preguntas'),
+    path('admin/preguntas/crear/', crear_pregunta_view, name='crear_pregunta'),
+    path('admin/preguntas/<int:pregunta_id>/', detalle_pregunta_view, name='detalle_pregunta'),
+    path('admin/preguntas/<int:pregunta_id>/actualizar/', actualizar_pregunta_view, name='actualizar_pregunta'),
+    path('admin/preguntas/<int:pregunta_id>/eliminar/', eliminar_pregunta_view, name='eliminar_pregunta'),
+    
     # ========================================
     # ACADÉMICO (Tutores) - GRUPOS
     # ========================================

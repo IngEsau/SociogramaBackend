@@ -41,6 +41,15 @@ from .cuestionarios import (
     desactivar_cuestionario_view,
     agregar_pregunta_view,
     remover_pregunta_view,
+    asociar_pregunta_view,
+)
+
+from .preguntas import (
+    listar_preguntas_view, 
+    crear_pregunta_view, 
+    detalle_pregunta_view, 
+    actualizar_pregunta_view, 
+    eliminar_pregunta_view
 )
 
 
@@ -73,4 +82,12 @@ __all__ = [
     'desactivar_cuestionario_view',
     'agregar_pregunta_view',
     'remover_pregunta_view',
+    'asociar_pregunta_view',
+
+    # Preguntas
+    'listar_preguntas_view',
+    'crear_pregunta_view',
+    'detalle_pregunta_view',
+    'actualizar_pregunta_view',
+    'eliminar_pregunta_view',
 ]
