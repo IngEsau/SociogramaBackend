@@ -1,6 +1,7 @@
 # core/views/admin/preguntas.py
 """
 Endpoints para gestión del banco de preguntas (Admin)
+ACTUALIZADO: filtro por es_copia=False para banco limpio
 """
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -20,7 +21,7 @@ LIMITE_BANCO = 30
 @require_admin
 def listar_preguntas_view(request):
     """
-    Lista todas las preguntas del banco global.
+    Lista las preguntas del banco global (excluye copias de cuestionarios).
 
     GET /api/admin/preguntas/
 
@@ -29,7 +30,8 @@ def listar_preguntas_view(request):
     - polaridad: POSITIVA | NEGATIVA (opcional)
     - activa: true | false (opcional)
     """
-    preguntas = Pregunta.objects.prefetch_related('opciones').all()
+    # Solo preguntas originales del banco — excluir copias creadas al clonar
+    preguntas = Pregunta.objects.prefetch_related('opciones').filter(es_copia=False)
 
     tipo = request.query_params.get('tipo')
     polaridad = request.query_params.get('polaridad')
@@ -59,7 +61,7 @@ def listar_preguntas_view(request):
 def crear_pregunta_view(request):
     """
     Crea una o varias preguntas en el banco global.
-    Límite máximo: 30 preguntas en el banco.
+    Límite máximo: 30 preguntas en el banco (no cuenta copias).
 
     Acepta un objeto o un array de objetos.
 
@@ -83,7 +85,6 @@ def crear_pregunta_view(request):
     """
     data = request.data
 
-    # Detectar si viene un objeto o un array
     es_bulk = isinstance(data, list)
     data_list = data if es_bulk else [data]
 
@@ -93,8 +94,8 @@ def crear_pregunta_view(request):
             'error': 'Debe enviar al menos una pregunta.'
         }, status=status.HTTP_400_BAD_REQUEST)
 
-    # Validar límite de 30 preguntas en el banco
-    total_actual = Pregunta.objects.count()
+    # Contar solo originales del banco (es_copia=False)
+    total_actual = Pregunta.objects.filter(es_copia=False).count()
     if total_actual + len(data_list) > LIMITE_BANCO:
         disponibles = LIMITE_BANCO - total_actual
         return Response({
@@ -104,7 +105,6 @@ def crear_pregunta_view(request):
                      f'Solo puedes agregar {disponibles} más.'
         }, status=status.HTTP_400_BAD_REQUEST)
 
-    # Validar todos antes de guardar cualquiera
     serializers_validos = []
     errores = []
 
@@ -119,7 +119,6 @@ def crear_pregunta_view(request):
                 'errores': serializer.errors
             })
 
-    # Si hay cualquier error no guardar nada
     if errores:
         return Response({
             'success': False,
@@ -127,8 +126,13 @@ def crear_pregunta_view(request):
             'errores': errores
         }, status=status.HTTP_400_BAD_REQUEST)
 
-    # Guardar todas
-    preguntas_creadas = [s.save() for s in serializers_validos]
+    # Guardar con es_copia=False (son originales del banco)
+    preguntas_creadas = []
+    for s in serializers_validos:
+        pregunta = s.save()
+        pregunta.es_copia = False
+        pregunta.save()
+        preguntas_creadas.append(pregunta)
 
     if es_bulk:
         return Response({
@@ -156,7 +160,8 @@ def detalle_pregunta_view(request, pregunta_id):
     """
     pregunta = get_object_or_404(
         Pregunta.objects.prefetch_related('opciones'),
-        id=pregunta_id
+        id=pregunta_id,
+        es_copia=False
     )
 
     serializer = PreguntaSerializer(pregunta)
@@ -224,4 +229,47 @@ def eliminar_pregunta_view(request, pregunta_id):
     return Response({
         'success': True,
         'message': f'Pregunta "{texto}..." eliminada del banco correctamente.'
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+@require_admin
+def editar_copia_view(request, pregunta_id):
+    """
+    Edita una pregunta que es copia (asociada a un cuestionario).
+    No opera sobre preguntas originales del banco.
+
+    PUT /api/admin/preguntas/<id>/editar-copia/
+
+    Body (campos opcionales):
+    {
+        "texto": "...",
+        "polaridad": "POSITIVA",
+        "max_elecciones": 3,
+        "descripcion": "..."
+    }
+    """
+    pregunta = get_object_or_404(Pregunta, id=pregunta_id, es_copia=True)
+
+    if pregunta.respuestas.exists():
+        return Response({
+            'success': False,
+            'error': 'No se puede editar una pregunta que ya tiene respuestas registradas.',
+            'respuestas_count': pregunta.respuestas.count()
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = PreguntaSerializer(pregunta, data=request.data, partial=True)
+
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    pregunta = serializer.save()
+
+    return Response({
+        'success': True,
+        'pregunta': PreguntaSerializer(pregunta).data
     }, status=status.HTTP_200_OK)
