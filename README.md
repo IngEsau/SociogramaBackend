@@ -96,72 +96,102 @@ JWT_REFRESH_TOKEN_LIFETIME=7
 ```
 sociograma_project/
 ├── core/
-│   ├── models/                    # Modelos organizados en módulos
-│   │   ├── __init__.py           # Exporta todos los modelos
-│   │   ├── base.py               # User extendido
-│   │   ├── academic.py           # División, Programa, PlanEstudio, Periodo
-│   │   ├── people.py             # Docente, Alumno
-│   │   ├── groups.py             # Grupo, AlumnoGrupo
-│   │   ├── surveys.py            # Pregunta, Opcion, Respuesta
-│   │   └── reports.py            # Reporte
+│   ├── admin/                         # Admin organizado en módulos
+│   │   ├── __init__.py               # Exporta todos los admins
+│   │   ├── academic.py               # Admins de catálogos académicos
+│   │   ├── base.py                   # UserAdmin
+│   │   ├── groups.py                 # GrupoAdmin, AlumnoGrupoAdmin
+│   │   ├── people.py                 # DocenteAdmin, AlumnoAdmin
+│   │   └── surveys.py                # Admins de encuestas y reportes
 │   │
-│   ├── admin/                     # Admin organizado en módulos
-│   │   ├── __init__.py           # Exporta todos los admins
-│   │   ├── base.py               # UserAdmin
-│   │   ├── academic.py           # Admins de catálogos académicos
-│   │   ├── people.py             # DocenteAdmin, AlumnoAdmin
-│   │   ├── groups.py             # GrupoAdmin, AlumnoGrupoAdmin
-│   │   └── surveys.py            # Admins de encuestas y reportes
+│   ├── migrations/
+│   │   ├── __init__.py
+│   │   └── 0001_initial.py
 │   │
-│   ├── views/                     # Views organizadas
-│   │   ├── __init__.py           # Exporta todas las views
-│   │   ├── auth.py               # Endpoints de autenticación
-│   │   ├── academic.py           # Endpoints académicos (tutores)
-│   │   └── admin/                # Views de administración
-│   │       ├── __init__.py       # Exporta endpoints admin
-│   │       ├── helpers.py        # Funciones auxiliares
-│   │       ├── import_csv.py     # Importación CSV
-│   │       ├── asignar_tutor.py     # Asignar Tutores
-│   │       ├── import_docentes.py     # Importar Docentes CSV
-│   │       ├── import_excel.py
-│   │       ├── periodos.py
-│   │       └── import_alumnos.py     # Importar Alumnos CSV
+│   ├── models/                        # Modelos organizados en módulos
+│   │   ├── __init__.py               # Exporta todos los modelos
+│   │   ├── academic.py               # División, Programa, PlanEstudio, Periodo
+│   │   ├── base.py                   # User extendido
+│   │   ├── groups.py                 # Grupo, AlumnoGrupo
+│   │   ├── people.py                 # Docente, Alumno
+│   │   ├── reports.py                # Reporte
+│   │   └── surveys.py                # Pregunta, Opcion, Cuestionario, Respuesta
 │   │
 │   ├── serializers/
+│   │   ├── __init__.py
 │   │   ├── alumno.py
 │   │   ├── auth.py
 │   │   ├── catalogos.py
+│   │   ├── cuestionario.py           # Serializers de cuestionarios (Opción C)
 │   │   ├── docente.py
 │   │   ├── grupo.py
-│   │   ├── pregunta.py
-│   │   └── __init__.py
+│   │   ├── import_excel.py
+│   │   └── pregunta.py               # Serializer del banco de preguntas
+│   │
+│   ├── templates/
+│   │   ├── emails/
+│   │   │   └── password_reset.html
+│   │   └── imgs/
+│   │       ├── Logo_Comite.png
+│   │       └── Logo_UTP.png
 │   │
 │   ├── utils/
+│   │   ├── __init__.py
 │   │   ├── auth.py
-│   │   ├── decorators.py
 │   │   ├── auth_validators.py
+│   │   ├── decorators.py
+│   │   ├── email.py
 │   │   ├── import_excel_helpers.py
-│   │   ├── validators.py
-│   │   └── __init__.py
+│   │   └── validators.py
 │   │
+│   ├── views/                         # Views organizadas por rol
+│   │   ├── __init__.py
+│   │   ├── auth.py                   # Endpoints de autenticación
+│   │   │
+│   │   ├── academic/                  # Endpoints para tutores/docentes
+│   │   │   ├── __init__.py
+│   │   │   ├── academic.py
+│   │   │   └── cuestionarios.py      # Estadísticas y progreso de grupos
+│   │   │
+│   │   ├── admin/                     # Endpoints de administración
+│   │   │   ├── __init__.py
+│   │   │   ├── asignar_tutor.py
+│   │   │   ├── cuestionarios.py      # CRUD cuestionarios + activar/desactivar
+│   │   │   ├── helpers.py
+│   │   │   ├── import_alumnos.py
+│   │   │   ├── import_csv.py
+│   │   │   ├── import_docentes.py
+│   │   │   ├── import_excel.py
+│   │   │   ├── periodos.py
+│   │   │   └── preguntas.py          # CRUD banco de preguntas (límite 30)
+│   │   │
+│   │   └── student/                   # Endpoints para alumnos
+│   │       ├── __init__.py
+│   │       └── cuestionarios.py      # Responder cuestionario con validaciones
+│   │
+│   ├── __init__.py
 │   ├── apps.py
 │   ├── pagination.py
 │   ├── permissions.py
 │   └── urls.py
 │
 ├── logs/
-│   └── django.log
+│   ├── django.log
+│   └── import_excel_20251112_005048.log
 │
 ├── sociograma_project/
+│   ├── __init__.py
 │   ├── asgi.py
 │   ├── settings.py
 │   ├── urls.py
 │   └── wsgi.py
 │
 ├── .env
+├── .env.example
 ├── .gitignore
 ├── datos.xlsx
 ├── import_excel.py
+├── importacion.log
 ├── manage.py
 ├── README.md
 └── requirements.txt
