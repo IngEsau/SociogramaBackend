@@ -33,6 +33,10 @@ class Pregunta(models.Model):
     activa = models.BooleanField(default=True)
     descripcion = models.TextField(null=True, blank=True)
     creado_en = models.DateTimeField(auto_now_add=True)
+    # Indica si esta pregunta es una copia generada al asociar al cuestionario.
+    # Las preguntas del banco tienen es_copia=False.
+    # Las copias creadas al clonar tienen es_copia=True.
+    es_copia = models.BooleanField(default=False)
     
     class Meta:
         db_table = 'preguntas'
@@ -107,17 +111,14 @@ class Cuestionario(models.Model):
     
     @property
     def total_respuestas(self):
-        """Contar respuestas del cuestionario"""
         return self.respuestas.count()
     
     @property
     def total_preguntas(self):
-        """Contar preguntas del cuestionario"""
         return self.preguntas.count()
     
     @property
     def total_grupos(self):
-        """Contar grupos que tienen estados en este cuestionario"""
         return self.estados.values('grupo').distinct().count()
 
 
@@ -191,7 +192,6 @@ class CuestionarioEstado(models.Model):
         return f"{self.alumno.matricula} - {self.grupo.clave} - {self.cuestionario.titulo} ({self.estado})"
     
     def actualizar_progreso(self):
-        """Calcular progreso basado en preguntas respondidas"""
         total_preguntas = self.cuestionario.preguntas.count()
         if total_preguntas == 0:
             return 0
@@ -202,7 +202,6 @@ class CuestionarioEstado(models.Model):
         
         self.progreso = (respuestas_count / total_preguntas) * 100
         
-        # Actualizar estado según progreso
         if self.progreso == 0:
             self.estado = 'PENDIENTE'
         elif self.progreso == 100:
@@ -274,12 +273,6 @@ class Respuesta(models.Model):
         return f"{self.alumno.matricula} - Pregunta {self.pregunta.orden}"
     
     def calcular_puntaje(self):
-        """
-        Calcular puntaje basado en orden de elección
-        1ra elección = 3 puntos
-        2da elección = 2 puntos  
-        3ra elección = 1 punto
-        """
         if self.orden_eleccion:
             max_elecciones = self.pregunta.max_elecciones
             self.puntaje = max(1, max_elecciones - self.orden_eleccion + 1)

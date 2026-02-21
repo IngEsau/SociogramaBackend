@@ -44,6 +44,7 @@ from .views.admin.preguntas import (
     detalle_pregunta_view,
     actualizar_pregunta_view,
     eliminar_pregunta_view,
+    editar_copia_view,
 )
 
 # Importar views de cuestionarios tutores
@@ -138,6 +139,7 @@ urlpatterns = [
     path('admin/preguntas/<int:pregunta_id>/', detalle_pregunta_view, name='detalle_pregunta'),
     path('admin/preguntas/<int:pregunta_id>/actualizar/', actualizar_pregunta_view, name='actualizar_pregunta'),
     path('admin/preguntas/<int:pregunta_id>/eliminar/', eliminar_pregunta_view, name='eliminar_pregunta'),
+    path('admin/preguntas/<int:pregunta_id>/editar-copia/', editar_copia_view, name='editar_copia_pregunta'),
     
     # ========================================
     # ACADÉMICO (Tutores) - GRUPOS

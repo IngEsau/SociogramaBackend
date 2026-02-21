@@ -49,7 +49,8 @@ from .preguntas import (
     crear_pregunta_view, 
     detalle_pregunta_view, 
     actualizar_pregunta_view, 
-    eliminar_pregunta_view
+    eliminar_pregunta_view,
+    editar_copia_view,
 )
 
 
@@ -90,4 +91,5 @@ __all__ = [
     'detalle_pregunta_view',
     'actualizar_pregunta_view',
     'eliminar_pregunta_view',
+    'editar_copia_view',
 ]
