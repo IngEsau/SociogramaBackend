@@ -37,6 +37,15 @@ class Pregunta(models.Model):
     # Las preguntas del banco tienen es_copia=False.
     # Las copias creadas al clonar tienen es_copia=True.
     es_copia = models.BooleanField(default=False)
+    # Par sociométrico — apunta a la pregunta opuesta (positiva <-> negativa)
+    par_pregunta = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='par_inverso',
+        db_column='par_pregunta_id'
+    )
     
     class Meta:
         db_table = 'preguntas'

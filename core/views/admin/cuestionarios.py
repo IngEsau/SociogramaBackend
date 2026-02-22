@@ -277,7 +277,8 @@ def agregar_pregunta_view(request, cuestionario_id):
         max_elecciones=serializer.validated_data.get('max_elecciones', 3),
         descripcion=serializer.validated_data.get('descripcion', ''),
         orden=nuevo_orden,
-        activa=True
+        activa=True,
+        es_copia=True
     )
     
     cuestionario_pregunta = CuestionarioPregunta.objects.create(

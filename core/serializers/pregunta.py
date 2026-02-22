@@ -21,12 +21,16 @@ class PreguntaSerializer(serializers.ModelSerializer):
     """
     opciones = OpcionSerializer(many=True, read_only=True)
     es_sociometrica = serializers.BooleanField(read_only=True)
+    par_pregunta_id = serializers.IntegerField(source='par_pregunta.id', read_only=True, allow_null=True)
+    par_pregunta_texto = serializers.CharField(source='par_pregunta.texto', read_only=True, allow_null=True)
+    par_pregunta_polaridad = serializers.CharField(source='par_pregunta.polaridad', read_only=True, allow_null=True)
 
     class Meta:
         model = Pregunta
         fields = [
             'id', 'texto', 'tipo', 'polaridad', 'max_elecciones', 'orden',
-            'activa', 'descripcion', 'es_sociometrica', 'opciones', 'creado_en'
+            'activa', 'descripcion', 'es_sociometrica', 'opciones', 'creado_en',
+            'par_pregunta_id', 'par_pregunta_texto', 'par_pregunta_polaridad'
         ]
         read_only_fields = ['id', 'creado_en']
 
@@ -45,7 +49,6 @@ class PreguntaSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, data):
-        # max_elecciones solo aplica a SELECCION_ALUMNO
         tipo = data.get('tipo', getattr(self.instance, 'tipo', None))
         max_elecciones = data.get('max_elecciones', None)
 
