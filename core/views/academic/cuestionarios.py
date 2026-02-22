@@ -7,10 +7,11 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
-from django.db.models import Count, Q, Avg
+from django.db.models import Count, Q, Avg, Sum, Case, When, IntegerField
 
 from core.models import (
-    Cuestionario, CuestionarioEstado, Grupo, Respuesta, Pregunta, Alumno
+    Cuestionario, CuestionarioEstado, Grupo, Respuesta, Pregunta, Alumno,
+    AlumnoGrupo
 )
 from core.serializers import (
     CuestionarioListSerializer,
@@ -25,22 +26,14 @@ from core.utils.decorators import require_tutor
 def listar_cuestionarios_tutor_view(request):
     """
     Lista cuestionarios activos del periodo actual
-    
     GET /api/academic/cuestionarios/
-    
-    Response:
-    {
-        "cuestionarios": [...]
-    }
     """
-    # Obtener grupos del tutor
     grupos_tutor = Grupo.objects.filter(
         tutor=request.docente,
         activo=True,
         periodo__activo=True
     ).values_list('periodo_id', flat=True).distinct()
     
-    # Cuestionarios activos de esos periodos
     cuestionarios = Cuestionario.objects.filter(
         periodo_id__in=grupos_tutor,
         activo=True
@@ -59,7 +52,6 @@ def listar_cuestionarios_tutor_view(request):
 def detalle_cuestionario_tutor_view(request, cuestionario_id):
     """
     Detalle de un cuestionario específico
-    
     GET /api/academic/cuestionarios/{id}/
     """
     cuestionario = get_object_or_404(
@@ -67,7 +59,6 @@ def detalle_cuestionario_tutor_view(request, cuestionario_id):
         id=cuestionario_id
     )
     
-    # Verificar que el tutor tenga acceso (sus grupos están en ese periodo)
     tiene_acceso = Grupo.objects.filter(
         tutor=request.docente,
         periodo=cuestionario.periodo,
@@ -92,29 +83,10 @@ def detalle_cuestionario_tutor_view(request, cuestionario_id):
 def progreso_cuestionario_view(request, cuestionario_id):
     """
     Ver progreso de todos los grupos del tutor en un cuestionario
-    
     GET /api/academic/cuestionarios/{id}/progreso/
-    
-    Response:
-    {
-        "cuestionario_id": 1,
-        "cuestionario_titulo": "...",
-        "grupos": [
-            {
-                "grupo_id": 1,
-                "grupo_clave": "1A",
-                "total_alumnos": 25,
-                "completados": 20,
-                "en_progreso": 3,
-                "pendientes": 2,
-                "porcentaje_completado": 80.0
-            }
-        ]
-    }
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
     
-    # Obtener grupos del tutor en el periodo del cuestionario
     grupos_tutor = Grupo.objects.filter(
         tutor=request.docente,
         periodo=cuestionario.periodo,
@@ -126,29 +98,39 @@ def progreso_cuestionario_view(request, cuestionario_id):
             'error': 'No tienes grupos en este periodo'
         }, status=status.HTTP_403_FORBIDDEN)
     
-    # Calcular progreso por grupo
+    grupos_ids = list(grupos_tutor.values_list('id', flat=True))
+    
+    # Una sola query para todos los conteos de estados
+    estados_agg = CuestionarioEstado.objects.filter(
+        cuestionario=cuestionario,
+        grupo_id__in=grupos_ids
+    ).values('grupo_id').annotate(
+        total=Count('id'),
+        completados=Count(Case(When(estado='COMPLETADO', then=1), output_field=IntegerField())),
+        en_progreso=Count(Case(When(estado='EN_PROGRESO', then=1), output_field=IntegerField())),
+        pendientes=Count(Case(When(estado='PENDIENTE', then=1), output_field=IntegerField())),
+    )
+    
+    # Indexar por grupo_id para lookup O(1)
+    estados_por_grupo = {e['grupo_id']: e for e in estados_agg}
+    
     grupos_data = []
     for grupo in grupos_tutor:
-        estados = CuestionarioEstado.objects.filter(
-            cuestionario=cuestionario,
-            grupo=grupo
-        )
-        
-        total_alumnos = estados.count()
-        completados = estados.filter(estado='COMPLETADO').count()
-        en_progreso = estados.filter(estado='EN_PROGRESO').count()
-        pendientes = estados.filter(estado='PENDIENTE').count()
-        
-        porcentaje = (completados / total_alumnos * 100) if total_alumnos > 0 else 0
+        e = estados_por_grupo.get(grupo.id, {
+            'total': 0, 'completados': 0, 'en_progreso': 0, 'pendientes': 0
+        })
+        total = e['total']
+        completados = e['completados']
+        porcentaje = round(completados / total * 100, 2) if total > 0 else 0
         
         grupos_data.append({
             'grupo_id': grupo.id,
             'grupo_clave': grupo.clave,
-            'total_alumnos': total_alumnos,
+            'total_alumnos': total,
             'completados': completados,
-            'en_progreso': en_progreso,
-            'pendientes': pendientes,
-            'porcentaje_completado': round(porcentaje, 2)
+            'en_progreso': e['en_progreso'],
+            'pendientes': e['pendientes'],
+            'porcentaje_completado': porcentaje
         })
     
     return Response({
@@ -165,53 +147,14 @@ def progreso_cuestionario_view(request, cuestionario_id):
 def estadisticas_cuestionario_view(request, cuestionario_id):
     """
     Estadísticas sociométricas por grupo (DATA PARA SOCIOGRAMA)
-    
     GET /api/academic/cuestionarios/{id}/estadisticas/
-    
     Query params:
-    - grupo_id: ID del grupo específico (opcional, si no se proporciona muestra todos)
-    
-    Response:
-    {
-        "cuestionario_id": 1,
-        "cuestionario_titulo": "...",
-        "grupos": [
-            {
-                "grupo_id": 1,
-                "grupo_clave": "1A",
-                "total_alumnos": 25,
-                "respuestas_completas": 20,
-                "nodos": [
-                    {
-                        "alumno_id": 1,
-                        "matricula": "UTP001",
-                        "nombre": "Juan Pérez",
-                        "tipo": "ACEPTADO",
-                        "puntos_recibidos": 48,
-                        "elecciones_recibidas": 12,
-                        "elecciones_realizadas": 3
-                    }
-                ],
-                "conexiones": [
-                    {
-                        "origen_id": 2,
-                        "origen_nombre": "María García",
-                        "destino_id": 1,
-                        "destino_nombre": "Juan Pérez",
-                        "peso": 3,
-                        "tipo_conexion": "fuerte"
-                    }
-                ]
-            }
-        ]
-    }
+    - grupo_id: ID del grupo específico (opcional)
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
     
-    # Filtro opcional por grupo
     grupo_id = request.query_params.get('grupo_id')
     
-    # Obtener grupos del tutor
     grupos_query = Grupo.objects.filter(
         tutor=request.docente,
         periodo=cuestionario.periodo,
@@ -228,11 +171,9 @@ def estadisticas_cuestionario_view(request, cuestionario_id):
             'error': 'No tienes grupos en este cuestionario'
         }, status=status.HTTP_403_FORBIDDEN)
     
-    # Generar estadísticas por grupo
     grupos_data = []
     
     for grupo in grupos:
-        # Calcular nodos y conexiones
         nodos_data = _calcular_nodos_sociograma(cuestionario, grupo)
         conexiones_data = _calcular_conexiones_sociograma(cuestionario, grupo)
         
@@ -254,116 +195,121 @@ def estadisticas_cuestionario_view(request, cuestionario_id):
 
 
 # ============================================
-# FUNCIONES HELPER
+# FUNCIONES HELPER — SIN N+1
 # ============================================
 
 def _calcular_nodos_sociograma(cuestionario, grupo):
     """
-    Calcula nodos (alumnos) con clasificación sociométrica
-    Separa puntos positivos y negativos
+    Calcula nodos con clasificación sociométrica.
+    Queries totales: 5 (independiente del número de alumnos)
+      1. AlumnoGrupo del grupo
+      2. IDs preguntas positivas
+      3. IDs preguntas negativas
+      4. Puntos recibidos por alumno (annotate en batch)
+      5. Estados por alumno
     """
-    from core.models import AlumnoGrupo
-    from django.db.models import Sum, Q
-    
-    # Obtener alumnos del grupo
+    # 1. Alumnos del grupo
     alumnos_grupo = AlumnoGrupo.objects.filter(
         grupo=grupo,
         activo=True
     ).select_related('alumno', 'alumno__user')
     
     total_alumnos = alumnos_grupo.count()
-    
-    # Obtener preguntas sociométricas del cuestionario separadas por polaridad
-    preguntas_positivas = cuestionario.preguntas.filter(
-        pregunta__tipo='SELECCION_ALUMNO',
-        pregunta__polaridad='POSITIVA'
-    ).values_list('pregunta_id', flat=True)
-    
-    preguntas_negativas = cuestionario.preguntas.filter(
-        pregunta__tipo='SELECCION_ALUMNO',
-        pregunta__polaridad='NEGATIVA'
-    ).values_list('pregunta_id', flat=True)
-    
+    alumnos_ids = list(alumnos_grupo.values_list('alumno_id', flat=True))
+
+    # 2 y 3. IDs de preguntas por polaridad
+    preguntas_positivas_ids = list(
+        cuestionario.preguntas.filter(
+            pregunta__tipo='SELECCION_ALUMNO',
+            pregunta__polaridad='POSITIVA'
+        ).values_list('pregunta_id', flat=True)
+    )
+    preguntas_negativas_ids = list(
+        cuestionario.preguntas.filter(
+            pregunta__tipo='SELECCION_ALUMNO',
+            pregunta__polaridad='NEGATIVA'
+        ).values_list('pregunta_id', flat=True)
+    )
+    todas_preguntas_ids = preguntas_positivas_ids + preguntas_negativas_ids
+
+    # 4. Puntos y conteos por alumno — una sola query con annotate
+    puntos_por_alumno = Respuesta.objects.filter(
+        cuestionario=cuestionario,
+        pregunta_id__in=todas_preguntas_ids,
+        seleccionado_alumno_id__in=alumnos_ids
+    ).values('seleccionado_alumno_id').annotate(
+        puntos_positivos=Sum(
+            Case(
+                When(pregunta_id__in=preguntas_positivas_ids, then='puntaje'),
+                default=0,
+                output_field=IntegerField()
+            )
+        ),
+        puntos_negativos=Sum(
+            Case(
+                When(pregunta_id__in=preguntas_negativas_ids, then='puntaje'),
+                default=0,
+                output_field=IntegerField()
+            )
+        ),
+        elecciones_recibidas=Count('id'),
+    )
+
+    # Elecciones realizadas por alumno — una query
+    elecciones_realizadas_qs = Respuesta.objects.filter(
+        cuestionario=cuestionario,
+        pregunta_id__in=todas_preguntas_ids,
+        alumno_id__in=alumnos_ids,
+        seleccionado_alumno__isnull=False
+    ).values('alumno_id').annotate(total=Count('id'))
+
+    # Estados por alumno — una query
+    estados_qs = CuestionarioEstado.objects.filter(
+        cuestionario=cuestionario,
+        alumno_id__in=alumnos_ids,
+        grupo=grupo
+    ).values('alumno_id', 'estado')
+
+    # Indexar resultados para lookup O(1)
+    puntos_map = {r['seleccionado_alumno_id']: r for r in puntos_por_alumno}
+    realizadas_map = {r['alumno_id']: r['total'] for r in elecciones_realizadas_qs}
+    estados_map = {r['alumno_id']: r['estado'] for r in estados_qs}
+
+    # Calcular max_impacto en memoria (sin queries adicionales)
+    max_impacto = 0
+    for alumno_id in alumnos_ids:
+        p = puntos_map.get(alumno_id, {})
+        pos = p.get('puntos_positivos') or 0
+        neg = p.get('puntos_negativos') or 0
+        impacto = pos + neg
+        if impacto > max_impacto:
+            max_impacto = impacto
+
+    # Construir nodos
     nodos = []
     respuestas_completas = 0
-    max_impacto = 0
-    
-    # Primera pasada: calcular impacto máximo
+
     for ag in alumnos_grupo:
         alumno = ag.alumno
-        
-        # Puntos POSITIVOS recibidos
-        puntos_positivos = Respuesta.objects.filter(
-            cuestionario=cuestionario,
-            pregunta_id__in=preguntas_positivas,
-            seleccionado_alumno=alumno
-        ).aggregate(total=Sum('puntaje'))['total'] or 0
-        
-        # Puntos NEGATIVOS recibidos
-        puntos_negativos = Respuesta.objects.filter(
-            cuestionario=cuestionario,
-            pregunta_id__in=preguntas_negativas,
-            seleccionado_alumno=alumno
-        ).aggregate(total=Sum('puntaje'))['total'] or 0
-        
+        p = puntos_map.get(alumno.id, {})
+
+        puntos_positivos = p.get('puntos_positivos') or 0
+        puntos_negativos = p.get('puntos_negativos') or 0
         impacto_total = puntos_positivos + puntos_negativos
-        if impacto_total > max_impacto:
-            max_impacto = impacto_total
-    
-    # Segunda pasada: crear nodos con clasificación
-    for ag in alumnos_grupo:
-        alumno = ag.alumno
-        
-        # Puntos POSITIVOS recibidos
-        puntos_positivos = Respuesta.objects.filter(
-            cuestionario=cuestionario,
-            pregunta_id__in=preguntas_positivas,
-            seleccionado_alumno=alumno
-        ).aggregate(total=Sum('puntaje'))['total'] or 0
-        
-        # Puntos NEGATIVOS recibidos
-        puntos_negativos = Respuesta.objects.filter(
-            cuestionario=cuestionario,
-            pregunta_id__in=preguntas_negativas,
-            seleccionado_alumno=alumno
-        ).aggregate(total=Sum('puntaje'))['total'] or 0
-        
-        # Impacto total (tamaño del nodo)
-        impacto_total = puntos_positivos + puntos_negativos
-        
-        # Contar elecciones RECIBIDAS
-        elecciones_recibidas = Respuesta.objects.filter(
-            cuestionario=cuestionario,
-            pregunta_id__in=list(preguntas_positivas) + list(preguntas_negativas),
-            seleccionado_alumno=alumno
-        ).count()
-        
-        # Contar elecciones REALIZADAS
-        elecciones_realizadas = Respuesta.objects.filter(
-            cuestionario=cuestionario,
-            pregunta_id__in=list(preguntas_positivas) + list(preguntas_negativas),
-            alumno=alumno,
-            seleccionado_alumno__isnull=False
-        ).count()
-        
-        # Verificar si completó el cuestionario
-        estado = CuestionarioEstado.objects.filter(
-            cuestionario=cuestionario,
-            alumno=alumno,
-            grupo=grupo
-        ).first()
-        
-        if estado and estado.estado == 'COMPLETADO':
+        elecciones_recibidas = p.get('elecciones_recibidas') or 0
+        elecciones_realizadas = realizadas_map.get(alumno.id, 0)
+        estado = estados_map.get(alumno.id, 'PENDIENTE')
+
+        if estado == 'COMPLETADO':
             respuestas_completas += 1
-        
-        # Clasificar alumno (ACEPTADO/RECHAZADO/INVISIBLE) según nueva lógica
+
         tipo = _clasificar_alumno(
-            puntos_positivos, 
-            puntos_negativos, 
-            impacto_total, 
+            puntos_positivos,
+            puntos_negativos,
+            impacto_total,
             max_impacto
         )
-        
+
         nodos.append({
             'alumno_id': alumno.id,
             'matricula': alumno.matricula,
@@ -372,12 +318,12 @@ def _calcular_nodos_sociograma(cuestionario, grupo):
             'puntos_positivos': puntos_positivos,
             'puntos_negativos': puntos_negativos,
             'impacto_total': impacto_total,
-            'tamano': impacto_total,  # Para el frontend
+            'tamano': impacto_total,
             'elecciones_recibidas': elecciones_recibidas,
             'elecciones_realizadas': elecciones_realizadas,
-            'completo': estado.estado == 'COMPLETADO' if estado else False
+            'completo': estado == 'COMPLETADO'
         })
-    
+
     return {
         'total_alumnos': total_alumnos,
         'respuestas_completas': respuestas_completas,
@@ -387,49 +333,53 @@ def _calcular_nodos_sociograma(cuestionario, grupo):
 
 def _calcular_conexiones_sociograma(cuestionario, grupo):
     """
-    Calcula conexiones (quién eligió a quién) con pesos
-    Conexiones fuertes/débiles según % de votos mutuos (>=33%)
+    Calcula conexiones con pesos.
+    Queries totales: 3 (independiente del número de alumnos)
+      1. IDs alumnos del grupo
+      2. IDs preguntas sociométricas + max_elecciones
+      3. Todas las respuestas del grupo en una query
     """
-    from core.models import AlumnoGrupo
-    from django.db.models import Count
-    
-    # IDs de alumnos del grupo
-    alumnos_ids = AlumnoGrupo.objects.filter(
-        grupo=grupo,
-        activo=True
-    ).values_list('alumno_id', flat=True)
-    
-    # Preguntas sociométricas
-    preguntas_socio = cuestionario.preguntas.filter(
-        pregunta__tipo='SELECCION_ALUMNO'
-    ).values_list('pregunta_id', flat=True)
-    
-    # Obtener todas las respuestas de selección entre alumnos del grupo
+    alumnos_ids = list(
+        AlumnoGrupo.objects.filter(grupo=grupo, activo=True)
+        .values_list('alumno_id', flat=True)
+    )
+
+    # Preguntas sociométricas con sus datos — evita Pregunta.objects.get() en loop
+    preguntas_socio = list(
+        cuestionario.preguntas.filter(
+            pregunta__tipo='SELECCION_ALUMNO'
+        ).select_related('pregunta').values(
+            'pregunta_id',
+            'pregunta__max_elecciones',
+            'pregunta__polaridad'
+        )
+    )
+    preguntas_ids = [p['pregunta_id'] for p in preguntas_socio]
+
+    # Calcular total de puntos posibles en memoria
+    total_puntos_posibles = sum(
+        len(alumnos_ids) * p['pregunta__max_elecciones'] * p['pregunta__max_elecciones']
+        for p in preguntas_socio
+    )
+
+    # Todas las respuestas del grupo en una sola query
     respuestas = Respuesta.objects.filter(
         cuestionario=cuestionario,
-        pregunta_id__in=preguntas_socio,
+        pregunta_id__in=preguntas_ids,
         alumno_id__in=alumnos_ids,
         seleccionado_alumno_id__in=alumnos_ids
     ).select_related(
-        'alumno', 'alumno__user',
-        'seleccionado_alumno', 'seleccionado_alumno__user',
+        'alumno__user',
+        'seleccionado_alumno__user',
         'pregunta'
     )
-    
-    # Calcular total de puntos posibles en el grupo
-    total_puntos_posibles = 0
-    for pregunta_id in preguntas_socio:
-        from core.models import Pregunta
-        pregunta = Pregunta.objects.get(id=pregunta_id)
-        # Cada alumno puede dar max_elecciones * puntaje_máximo
-        total_puntos_posibles += len(alumnos_ids) * pregunta.max_elecciones * pregunta.max_elecciones
-    
-    # Agrupar respuestas por pares (origen, destino)
+
+    # Agrupar en memoria
     conexiones_dict = {}
-    
+
     for resp in respuestas:
         key = (resp.alumno.id, resp.seleccionado_alumno.id)
-        
+
         if key not in conexiones_dict:
             conexiones_dict[key] = {
                 'origen_id': resp.alumno.id,
@@ -437,38 +387,30 @@ def _calcular_conexiones_sociograma(cuestionario, grupo):
                 'destino_id': resp.seleccionado_alumno.id,
                 'destino_nombre': resp.seleccionado_alumno.user.nombre_completo,
                 'peso_total': 0,
-                'conteo': 0,
                 'polaridad': resp.pregunta.polaridad
             }
-        
+
         conexiones_dict[key]['peso_total'] += resp.puntaje or 1
-        conexiones_dict[key]['conteo'] += 1
-    
-    # Calcular conexiones con tipo según % mutuo
+
+    # Calcular tipo de conexión en memoria
     conexiones = []
-    
+
     for key, data in conexiones_dict.items():
         origen_id, destino_id = key
-        
-        # Calcular puntos mutuos (bidireccionales)
         key_inversa = (destino_id, origen_id)
-        
+
         if key_inversa in conexiones_dict:
-            # Hay conexión mutua
             puntos_mutuos = data['peso_total'] + conexiones_dict[key_inversa]['peso_total']
         else:
-            # Solo unidireccional
             puntos_mutuos = data['peso_total']
-        
-        # Calcular porcentaje del total
-        porcentaje_mutuo = (puntos_mutuos / total_puntos_posibles * 100) if total_puntos_posibles > 0 else 0
-        
-        # Clasificar tipo de conexión según % mutuo
-        if porcentaje_mutuo >= 33:
-            tipo_conexion = 'fuerte'
-        else:
-            tipo_conexion = 'debil'
-        
+
+        porcentaje_mutuo = (
+            round(puntos_mutuos / total_puntos_posibles * 100, 2)
+            if total_puntos_posibles > 0 else 0
+        )
+
+        tipo_conexion = 'fuerte' if porcentaje_mutuo >= 33 else 'debil'
+
         conexiones.append({
             'origen_id': data['origen_id'],
             'origen_nombre': data['origen_nombre'],
@@ -476,38 +418,27 @@ def _calcular_conexiones_sociograma(cuestionario, grupo):
             'destino_nombre': data['destino_nombre'],
             'peso': data['peso_total'],
             'tipo_conexion': tipo_conexion,
-            'porcentaje_mutuo': round(porcentaje_mutuo, 2),
+            'porcentaje_mutuo': porcentaje_mutuo,
             'es_mutua': key_inversa in conexiones_dict,
             'polaridad': data['polaridad']
         })
-    
+
     return conexiones
 
 
 def _clasificar_alumno(puntos_positivos, puntos_negativos, impacto_total, max_impacto):
     """
-    Clasifica al alumno según su impacto sociométrico
-    
-    LÓGICA:
-    - INVISIBLE (gris): impacto_total <= 5% del máximo
-    - ACEPTADO (verde): puntos_positivos > puntos_negativos
-    - RECHAZADO (rojo): puntos_negativos > puntos_positivos
-    - Si son iguales: ACEPTADO (neutral positivo)
+    Clasifica al alumno según su impacto sociométrico.
+    INVISIBLE: impacto <= 5% del máximo
+    ACEPTADO: positivos > negativos (o empate)
+    RECHAZADO: negativos > positivos
     """
-    # Calcular 5% del impacto máximo
     umbral_invisible = max_impacto * 0.05
-    
-    # Gris: Impacto muy bajo (<=5% del máximo)
+
     if impacto_total <= umbral_invisible:
         return 'INVISIBLE'
-    
-    # Verde: Más positivos que negativos
-    if puntos_positivos > puntos_negativos:
+
+    if puntos_positivos >= puntos_negativos:
         return 'ACEPTADO'
-    
-    # Rojo: Más negativos que positivos
-    if puntos_negativos > puntos_positivos:
-        return 'RECHAZADO'
-    
-    # Empate: consideramos neutral-positivo
-    return 'ACEPTADO'
+
+    return 'RECHAZADO'

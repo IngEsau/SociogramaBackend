@@ -15,6 +15,7 @@ class User(AbstractUser):
         ('ALUMNO', 'Alumno'),
         ('DOCENTE', 'Docente'),
         ('ADMIN', 'Administrador'),
+        ('COMITE', 'Comité'),
     ]
     
     GENERO_CHOICES = [

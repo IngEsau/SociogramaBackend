@@ -1,3 +1,4 @@
+# core/serializers/auth.py
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from core.models import User, Alumno  
