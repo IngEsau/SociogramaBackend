@@ -311,3 +311,104 @@ def log_api_call(view_func):
         
         return response
     return wrapper
+
+
+# ============================================
+# NUEVOS DECORADORES — ROL COMITÉ
+# ============================================
+
+def require_comite(view_func):
+    """
+    Decorador para requerir que el usuario tenga rol COMITE.
+
+    El rol COMITE no tiene tabla de perfil asociada (sin docente/alumno),
+    solo existe en auth_user.rol. Solo puede acceder a endpoints de
+    analytics en modo lectura (GET).
+
+    Valida:
+    - Que el rol del usuario sea exactamente 'COMITE'
+    - Que el usuario esté activo (is_active=True)
+
+    Uso:
+        @api_view(['GET'])
+        @permission_classes([IsAuthenticated])
+        @require_comite
+        def mi_vista(request):
+            # request.user disponible con rol COMITE
+            # ...
+    """
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        # Verificar rol COMITE
+        if request.user.rol != 'COMITE':
+            return Response(
+                {'error': 'Solo miembros del Comité pueden acceder a este endpoint'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Verificar que esté activo (doble check, IsAuthenticated ya lo valida
+        # pero lo dejamos explícito por claridad)
+        if not request.user.is_active:
+            return Response(
+                {
+                    'error': 'Tu cuenta está inactiva',
+                    'detail': 'Contacta al administrador del sistema'
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
+
+def require_comite_readonly(view_func):
+    """
+    Decorador para requerir rol COMITE y que el método sea de solo lectura.
+
+    Bloquea explícitamente cualquier método que no sea GET/HEAD/OPTIONS,
+    aunque los endpoints de COMITE deben estar declarados solo con ['GET'].
+    Esta es una capa de seguridad adicional.
+
+    Valida:
+    - Que el rol sea 'COMITE'
+    - Que el método HTTP sea seguro (GET, HEAD, OPTIONS)
+
+    Uso:
+        @api_view(['GET'])
+        @permission_classes([IsAuthenticated])
+        @require_comite_readonly
+        def mi_vista(request):
+            # ...
+    """
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        # Verificar rol COMITE
+        if request.user.rol != 'COMITE':
+            return Response(
+                {'error': 'Solo miembros del Comité pueden acceder a este endpoint'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Verificar que esté activo
+        if not request.user.is_active:
+            return Response(
+                {
+                    'error': 'Tu cuenta está inactiva',
+                    'detail': 'Contacta al administrador del sistema'
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Bloquear métodos de escritura (capa extra de seguridad)
+        SAFE_METHODS = ('GET', 'HEAD', 'OPTIONS')
+        if request.method not in SAFE_METHODS:
+            return Response(
+                {
+                    'error': 'El Comité solo tiene acceso de lectura',
+                    'detail': f'Método {request.method} no permitido para este rol'
+                },
+                status=status.HTTP_405_METHOD_NOT_ALLOWED
+            )
+
+        return view_func(request, *args, **kwargs)
+    return wrapper

@@ -47,6 +47,15 @@ from .views.admin.preguntas import (
     editar_copia_view,
 )
 
+# Importar views de COMITÉ
+from .views.comite.cuestionarios import (
+    listar_cuestionarios_comite_view,
+    detalle_cuestionario_comite_view,
+    progreso_cuestionario_comite_view,
+    estadisticas_cuestionario_comite_view,
+)
+
+
 # Importar views de cuestionarios tutores
 from .views.academic.cuestionarios import (
     listar_cuestionarios_tutor_view,
@@ -140,6 +149,14 @@ urlpatterns = [
     path('admin/preguntas/<int:pregunta_id>/actualizar/', actualizar_pregunta_view, name='actualizar_pregunta'),
     path('admin/preguntas/<int:pregunta_id>/eliminar/', eliminar_pregunta_view, name='eliminar_pregunta'),
     path('admin/preguntas/<int:pregunta_id>/editar-copia/', editar_copia_view, name='editar_copia_pregunta'),
+
+    # ========================================
+    # COMITÉ - ANALYTICS (Solo Lectura)
+    # ========================================
+    path('comite/cuestionarios/', listar_cuestionarios_comite_view, name='listar_cuestionarios_comite'),
+    path('comite/cuestionarios/<int:cuestionario_id>/', detalle_cuestionario_comite_view, name='detalle_cuestionario_comite'),
+    path('comite/cuestionarios/<int:cuestionario_id>/progreso/', progreso_cuestionario_comite_view, name='progreso_cuestionario_comite'),
+    path('comite/cuestionarios/<int:cuestionario_id>/estadisticas/', estadisticas_cuestionario_comite_view, name='estadisticas_cuestionario_comite'),
     
     # ========================================
     # ACADÉMICO (Tutores) - GRUPOS
