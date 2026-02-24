@@ -55,6 +55,13 @@ from .views.comite.cuestionarios import (
     estadisticas_cuestionario_comite_view,
 )
 
+from .views.comite.dashboard import (
+    overview_comite_view,
+    graphs_comite_view,
+    progreso_overview_comite_view,
+    alertas_comite_view,
+    centralidad_comite_view,
+)
 
 # Importar views de cuestionarios tutores
 from .views.academic.cuestionarios import (
@@ -157,6 +164,13 @@ urlpatterns = [
     path('comite/cuestionarios/<int:cuestionario_id>/', detalle_cuestionario_comite_view, name='detalle_cuestionario_comite'),
     path('comite/cuestionarios/<int:cuestionario_id>/progreso/', progreso_cuestionario_comite_view, name='progreso_cuestionario_comite'),
     path('comite/cuestionarios/<int:cuestionario_id>/estadisticas/', estadisticas_cuestionario_comite_view, name='estadisticas_cuestionario_comite'),
+
+    # COMITÉ - DASHBOARD
+    path('comite/overview/', overview_comite_view, name='overview_comite'),
+    path('comite/overview/progreso/', progreso_overview_comite_view, name='progreso_overview_comite'),
+    path('comite/overview/alertas/', alertas_comite_view, name='alertas_comite'),
+    path('comite/overview/centralidad/', centralidad_comite_view, name='centralidad_comite'),
+    path('comite/graphs/', graphs_comite_view, name='graphs_comite'),
     
     # ========================================
     # ACADÉMICO (Tutores) - GRUPOS
