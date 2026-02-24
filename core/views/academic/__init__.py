@@ -12,6 +12,7 @@ from .cuestionarios import (
     detalle_cuestionario_tutor_view,
     progreso_cuestionario_view,
     estadisticas_cuestionario_view,
+    registro_cuestionario_view,
 )
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     'detalle_cuestionario_tutor_view',
     'progreso_cuestionario_view',
     'estadisticas_cuestionario_view',
+    'registro_cuestionario_view',
 ]

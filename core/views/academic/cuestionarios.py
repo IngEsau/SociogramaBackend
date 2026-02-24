@@ -82,24 +82,36 @@ def detalle_cuestionario_tutor_view(request, cuestionario_id):
 @require_tutor
 def progreso_cuestionario_view(request, cuestionario_id):
     """
-    Ver progreso de todos los grupos del tutor en un cuestionario
+    Ver progreso de todos los grupos del tutor en un cuestionario.
+    Si se especifica ?grupo_id=X, incluye lista de alumnos con fechas.
+
     GET /api/academic/cuestionarios/{id}/progreso/
+    GET /api/academic/cuestionarios/{id}/progreso/?grupo_id={id}
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
-    
+
     grupos_tutor = Grupo.objects.filter(
         tutor=request.docente,
         periodo=cuestionario.periodo,
         activo=True
     ).select_related('periodo')
-    
+
     if not grupos_tutor.exists():
         return Response({
             'error': 'No tienes grupos en este periodo'
         }, status=status.HTTP_403_FORBIDDEN)
-    
+
+    grupo_id = request.query_params.get('grupo_id')
+
+    if grupo_id:
+        grupos_tutor = grupos_tutor.filter(id=grupo_id)
+        if not grupos_tutor.exists():
+            return Response({
+                'error': 'No tienes acceso a este grupo'
+            }, status=status.HTTP_403_FORBIDDEN)
+
     grupos_ids = list(grupos_tutor.values_list('id', flat=True))
-    
+
     # Una sola query para todos los conteos de estados
     estados_agg = CuestionarioEstado.objects.filter(
         cuestionario=cuestionario,
@@ -110,10 +122,41 @@ def progreso_cuestionario_view(request, cuestionario_id):
         en_progreso=Count(Case(When(estado='EN_PROGRESO', then=1), output_field=IntegerField())),
         pendientes=Count(Case(When(estado='PENDIENTE', then=1), output_field=IntegerField())),
     )
-    
-    # Indexar por grupo_id para lookup O(1)
+
     estados_por_grupo = {e['grupo_id']: e for e in estados_agg}
-    
+
+    # Si viene grupo_id, cargar detalle de alumnos con fechas — una sola query
+    alumnos_por_grupo = {}
+    if grupo_id:
+        estados_detalle = CuestionarioEstado.objects.filter(
+            cuestionario=cuestionario,
+            grupo_id__in=grupos_ids
+        ).select_related(
+            'alumno', 'alumno__user'
+        ).order_by('alumno__user__nombre_completo')
+
+        for estado in estados_detalle:
+            gid = estado.grupo_id
+            if gid not in alumnos_por_grupo:
+                alumnos_por_grupo[gid] = []
+
+            tiempo_transcurrido = None
+            if estado.fecha_inicio and estado.fecha_completado:
+                delta = estado.fecha_completado - estado.fecha_inicio
+                minutos = int(delta.total_seconds() // 60)
+                segundos = int(delta.total_seconds() % 60)
+                tiempo_transcurrido = f"{minutos}m {segundos}s"
+
+            alumnos_por_grupo[gid].append({
+                'alumno_id': estado.alumno.id,
+                'matricula': estado.alumno.matricula,
+                'nombre': estado.alumno.user.nombre_completo,
+                'estado': estado.estado,
+                'fecha_inicio': estado.fecha_inicio,
+                'fecha_completado': estado.fecha_completado,
+                'tiempo_transcurrido': tiempo_transcurrido,
+            })
+
     grupos_data = []
     for grupo in grupos_tutor:
         e = estados_por_grupo.get(grupo.id, {
@@ -122,8 +165,8 @@ def progreso_cuestionario_view(request, cuestionario_id):
         total = e['total']
         completados = e['completados']
         porcentaje = round(completados / total * 100, 2) if total > 0 else 0
-        
-        grupos_data.append({
+
+        grupo_data = {
             'grupo_id': grupo.id,
             'grupo_clave': grupo.clave,
             'total_alumnos': total,
@@ -131,15 +174,20 @@ def progreso_cuestionario_view(request, cuestionario_id):
             'en_progreso': e['en_progreso'],
             'pendientes': e['pendientes'],
             'porcentaje_completado': porcentaje
-        })
-    
+        }
+
+        # Solo incluir detalle de alumnos si se pidió grupo específico
+        if grupo_id:
+            grupo_data['alumnos'] = alumnos_por_grupo.get(grupo.id, [])
+
+        grupos_data.append(grupo_data)
+
     return Response({
         'cuestionario_id': cuestionario.id,
         'cuestionario_titulo': cuestionario.titulo,
         'total_grupos': len(grupos_data),
         'grupos': grupos_data
     }, status=status.HTTP_200_OK)
-
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -192,6 +240,125 @@ def estadisticas_cuestionario_view(request, cuestionario_id):
         'total_grupos': len(grupos_data),
         'grupos': grupos_data
     }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+@require_tutor
+def registro_cuestionario_view(request, cuestionario_id):
+    """
+    Registro detallado de actividad por alumno en un grupo específico.
+    grupo_id es requerido.
+
+    GET /api/academic/cuestionarios/{id}/registro/?grupo_id={id}
+
+    Response:
+    {
+        "cuestionario_id": 1,
+        "cuestionario_titulo": "...",
+        "grupo_id": 1,
+        "grupo_clave": "IDGS-5-A",
+        "resumen": {
+            "total": 25,
+            "completados": 18,
+            "en_progreso": 4,
+            "pendientes": 3,
+            "porcentaje_completado": 72.0
+        },
+        "alumnos": [
+            {
+                "alumno_id": 1,
+                "matricula": "UP210001",
+                "nombre": "Juan Pérez López",
+                "estado": "COMPLETADO",
+                "fecha_inicio": "2026-02-10T09:15:00Z",
+                "fecha_completado": "2026-02-10T09:45:00Z",
+                "tiempo_transcurrido": "30m 0s"
+            }
+        ]
+    }
+    """
+    cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
+
+    grupo_id = request.query_params.get('grupo_id')
+
+    if not grupo_id:
+        return Response({
+            'error': 'El parámetro grupo_id es requerido'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    # Verificar que el grupo pertenece al tutor
+    grupo = Grupo.objects.filter(
+        id=grupo_id,
+        tutor=request.docente,
+        periodo=cuestionario.periodo,
+        activo=True
+    ).first()
+
+    if not grupo:
+        return Response({
+            'error': 'No tienes acceso a este grupo'
+        }, status=status.HTTP_403_FORBIDDEN)
+
+    # Obtener todos los estados del grupo — una sola query
+    estados = CuestionarioEstado.objects.filter(
+        cuestionario=cuestionario,
+        grupo=grupo
+    ).select_related(
+        'alumno', 'alumno__user'
+    ).order_by('alumno__user__nombre_completo')
+
+    # Construir lista de alumnos y resumen en una sola pasada
+    alumnos_data = []
+    total = 0
+    completados = 0
+    en_progreso = 0
+    pendientes = 0
+
+    for estado in estados:
+        total += 1
+
+        if estado.estado == 'COMPLETADO':
+            completados += 1
+        elif estado.estado == 'EN_PROGRESO':
+            en_progreso += 1
+        else:
+            pendientes += 1
+
+        tiempo_transcurrido = None
+        if estado.fecha_inicio and estado.fecha_completado:
+            delta = estado.fecha_completado - estado.fecha_inicio
+            minutos = int(delta.total_seconds() // 60)
+            segundos = int(delta.total_seconds() % 60)
+            tiempo_transcurrido = f"{minutos}m {segundos}s"
+
+        alumnos_data.append({
+            'alumno_id': estado.alumno.id,
+            'matricula': estado.alumno.matricula,
+            'nombre': estado.alumno.user.nombre_completo,
+            'estado': estado.estado,
+            'fecha_inicio': estado.fecha_inicio,
+            'fecha_completado': estado.fecha_completado,
+            'tiempo_transcurrido': tiempo_transcurrido,
+        })
+
+    porcentaje = round(completados / total * 100, 2) if total > 0 else 0
+
+    return Response({
+        'cuestionario_id': cuestionario.id,
+        'cuestionario_titulo': cuestionario.titulo,
+        'grupo_id': grupo.id,
+        'grupo_clave': grupo.clave,
+        'resumen': {
+            'total': total,
+            'completados': completados,
+            'en_progreso': en_progreso,
+            'pendientes': pendientes,
+            'porcentaje_completado': porcentaje,
+        },
+        'alumnos': alumnos_data,
+    }, status=status.HTTP_200_OK)
+
 
 
 # ============================================

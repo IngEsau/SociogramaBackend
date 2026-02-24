@@ -201,6 +201,8 @@ class CuestionarioEstado(models.Model):
         return f"{self.alumno.matricula} - {self.grupo.clave} - {self.cuestionario.titulo} ({self.estado})"
     
     def actualizar_progreso(self):
+        from django.utils import timezone
+
         total_preguntas = self.cuestionario.preguntas.count()
         if total_preguntas == 0:
             return 0
@@ -213,15 +215,17 @@ class CuestionarioEstado(models.Model):
         
         if self.progreso == 0:
             self.estado = 'PENDIENTE'
+
         elif self.progreso == 100:
             self.estado = 'COMPLETADO'
+            if not self.fecha_inicio:
+                self.fecha_inicio = timezone.now()
             if not self.fecha_completado:
-                from django.utils import timezone
                 self.fecha_completado = timezone.now()
+
         else:
             self.estado = 'EN_PROGRESO'
             if not self.fecha_inicio:
-                from django.utils import timezone
                 self.fecha_inicio = timezone.now()
         
         self.save()
