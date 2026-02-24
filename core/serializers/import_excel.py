@@ -1,4 +1,4 @@
-# core/serializers/importacion.py
+# core/serializers/import_excel.py
 """
 Serializers para importación de datos
 """

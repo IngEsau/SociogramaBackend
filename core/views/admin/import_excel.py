@@ -141,6 +141,10 @@ def analizar_importacion_view(request):
             'preview': preview,
             'periodos_disponibles': periodos_disponibles,
             'periodo_sugerido': periodo_sugerido,
+            'advertencias': [
+                'Si activas "desactivar_anteriores", se desactivarán todos los periodos anteriores '
+                'y sus inscripciones. Los datos de cuestionarios y sociogramas NO se perderán.'
+            ],
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
@@ -453,11 +457,25 @@ def importar_divisiones_programas(df_alumnos, df_grupos):
         programas_unicos.update(df_alumnos['Programa'].dropna().unique())
     if 'Programa' in df_grupos.columns:
         programas_unicos.update(df_grupos['Programa'].dropna().unique())
+    # Cargar programas existentes en BD para evitar duplicados por
+    # nombres ligeramente diferentes entre importaciones
+    programas_en_bd = {
+        p.nombre.strip().lower(): p
+        for p in Programa.objects.all()
+    }
     
     # Crear programas
     for prog_nombre in programas_unicos:
         prog_nombre = limpiar_texto(prog_nombre)
         if not prog_nombre:
+            continue
+
+        # Antes de generar código, buscar si ya existe un programa
+        # con el mismo nombre (ignorando mayúsculas/minúsculas y espacios)
+        prog_nombre_norm = prog_nombre.strip().lower()
+        if prog_nombre_norm in programas_en_bd:
+            # Reutilizar el programa existente — no crear duplicado
+            programas_cache[prog_nombre] = programas_en_bd[prog_nombre_norm]
             continue
         
         # Buscar división correspondiente

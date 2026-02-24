@@ -1,4 +1,4 @@
-# core/utils/importacion_helpers.py
+# core/utils/import_excel_helpers.py
 """
 Funciones auxiliares para importación de datos desde Excel
 """
@@ -301,7 +301,6 @@ def calcular_estadisticas_cambios(periodo_actual):
     alumnos_anteriores = set(
         AlumnoGrupo.objects.filter(
             grupo__periodo=periodo_anterior,
-            activo=0
         ).values_list('alumno__matricula', flat=True)
     )
     
