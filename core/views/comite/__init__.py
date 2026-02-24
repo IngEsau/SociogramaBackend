@@ -21,9 +21,24 @@ from .cuestionarios import (
     estadisticas_cuestionario_comite_view,
 )
 
+from .dashboard import (
+    overview_comite_view,
+    graphs_comite_view,
+    progreso_overview_comite_view,
+    alertas_comite_view,
+    centralidad_comite_view,
+)
+
 __all__ = [
+    # Cuestionarios
     'listar_cuestionarios_comite_view',
     'detalle_cuestionario_comite_view',
     'progreso_cuestionario_comite_view',
     'estadisticas_cuestionario_comite_view',
+    # Dashboard
+    'overview_comite_view',
+    'graphs_comite_view',
+    'progreso_overview_comite_view',
+    'alertas_comite_view',
+    'centralidad_comite_view',
 ]
