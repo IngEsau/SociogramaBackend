@@ -1,8 +1,6 @@
 # core/views/admin/cuestionarios.py
 """
 Endpoints para gestión de cuestionarios (Admin)
-REFACTORIZADO: Cuestionarios por PERIODO
-ACTUALIZADO Fase 3: asociar_pregunta_view — asociar pregunta existente del banco
 """
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -12,7 +10,7 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 
 from core.models import (
-    Cuestionario, CuestionarioPregunta, CuestionarioEstado, 
+    Cuestionario, CuestionarioPregunta, CuestionarioEstado,
     Pregunta, Periodo, Grupo, AlumnoGrupo
 )
 from core.serializers import (
@@ -48,16 +46,16 @@ def crear_cuestionario_view(request):
     }
     """
     serializer = CuestionarioCreateSerializer(data=request.data)
-    
+
     if not serializer.is_valid():
         return Response({
             'success': False,
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
-    
+
     cuestionario = serializer.save()
     detail_serializer = CuestionarioDetailSerializer(cuestionario)
-    
+
     return Response({
         'success': True,
         'cuestionario': detail_serializer.data,
@@ -79,20 +77,20 @@ def listar_cuestionarios_view(request):
     - activo: true/false (opcional)
     """
     cuestionarios = Cuestionario.objects.select_related('periodo').all()
-    
+
     periodo_id = request.query_params.get('periodo')
     activo = request.query_params.get('activo')
-    
+
     if periodo_id:
         cuestionarios = cuestionarios.filter(periodo_id=periodo_id)
-    
+
     if activo is not None:
         activo_bool = activo.lower() == 'true'
         cuestionarios = cuestionarios.filter(activo=activo_bool)
-    
+
     cuestionarios = cuestionarios.order_by('-creado_en')
     serializer = CuestionarioListSerializer(cuestionarios, many=True)
-    
+
     return Response({
         'cuestionarios': serializer.data
     }, status=status.HTTP_200_OK)
@@ -111,9 +109,9 @@ def detalle_cuestionario_view(request, cuestionario_id):
         Cuestionario.objects.select_related('periodo'),
         id=cuestionario_id
     )
-    
+
     serializer = CuestionarioDetailSerializer(cuestionario)
-    
+
     return Response({
         'cuestionario': serializer.data
     }, status=status.HTTP_200_OK)
@@ -129,18 +127,18 @@ def actualizar_cuestionario_view(request, cuestionario_id):
     PUT /api/admin/cuestionarios/{id}/actualizar/
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
-    
+
     serializer = CuestionarioUpdateSerializer(cuestionario, data=request.data, partial=True)
-    
+
     if not serializer.is_valid():
         return Response({
             'success': False,
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
-    
+
     cuestionario = serializer.save()
     detail_serializer = CuestionarioDetailSerializer(cuestionario)
-    
+
     return Response({
         'success': True,
         'cuestionario': detail_serializer.data
@@ -157,17 +155,17 @@ def eliminar_cuestionario_view(request, cuestionario_id):
     DELETE /api/admin/cuestionarios/{id}/eliminar/
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
-    
+
     if cuestionario.total_respuestas > 0:
         return Response({
             'success': False,
             'error': 'No se puede eliminar un cuestionario que ya tiene respuestas',
             'respuestas_count': cuestionario.total_respuestas
         }, status=status.HTTP_400_BAD_REQUEST)
-    
+
     titulo = cuestionario.titulo
     cuestionario.delete()
-    
+
     return Response({
         'success': True,
         'message': f'Cuestionario "{titulo}" eliminado correctamente'
@@ -185,26 +183,26 @@ def activar_cuestionario_view(request, cuestionario_id):
     POST /api/admin/cuestionarios/{id}/activar/
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
-    
+
     if cuestionario.total_preguntas == 0:
         return Response({
             'success': False,
             'error': 'No se puede activar un cuestionario sin preguntas'
         }, status=status.HTTP_400_BAD_REQUEST)
-    
+
     with transaction.atomic():
         cuestionarios_desactivados = Cuestionario.objects.filter(
             periodo=cuestionario.periodo,
             activo=True
         ).exclude(id=cuestionario_id).update(activo=False)
-        
+
         cuestionario.activo = True
         cuestionario.save()
-        
+
         estados_creados = _crear_estados_para_periodo(cuestionario)
-    
+
     serializer = CuestionarioDetailSerializer(cuestionario)
-    
+
     return Response({
         'success': True,
         'cuestionario': serializer.data,
@@ -224,12 +222,12 @@ def desactivar_cuestionario_view(request, cuestionario_id):
     POST /api/admin/cuestionarios/{id}/desactivar/
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
-    
+
     cuestionario.activo = False
     cuestionario.save()
-    
+
     serializer = CuestionarioDetailSerializer(cuestionario)
-    
+
     return Response({
         'success': True,
         'cuestionario': serializer.data
@@ -256,20 +254,20 @@ def agregar_pregunta_view(request, cuestionario_id):
     }
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
-    
+
     serializer = AgregarPreguntaSerializer(data=request.data)
-    
+
     if not serializer.is_valid():
         return Response({
             'success': False,
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
-    
+
     ultimo_orden = CuestionarioPregunta.objects.filter(
         cuestionario=cuestionario
     ).count()
     nuevo_orden = ultimo_orden + 1
-    
+
     pregunta = Pregunta.objects.create(
         texto=serializer.validated_data['texto'],
         tipo=serializer.validated_data['tipo'],
@@ -280,15 +278,15 @@ def agregar_pregunta_view(request, cuestionario_id):
         activa=True,
         es_copia=True
     )
-    
+
     cuestionario_pregunta = CuestionarioPregunta.objects.create(
         cuestionario=cuestionario,
         pregunta=pregunta,
         orden=nuevo_orden
     )
-    
+
     response_serializer = CuestionarioPreguntaSerializer(cuestionario_pregunta)
-    
+
     return Response({
         'success': True,
         'cuestionario_pregunta': response_serializer.data,
@@ -322,16 +320,13 @@ def asociar_pregunta_view(request, cuestionario_id):
             'error': 'El campo pregunta_id es requerido.'
         }, status=status.HTTP_400_BAD_REQUEST)
 
-    # Verificar que la pregunta exista y esté activa
     pregunta_banco = get_object_or_404(Pregunta, id=pregunta_id, activa=True)
 
-    # Determinar orden
     ultimo_orden = CuestionarioPregunta.objects.filter(
         cuestionario=cuestionario
     ).count()
     nuevo_orden = ultimo_orden + 1
 
-    # Clonar la pregunta del banco
     from core.serializers.cuestionario import _clonar_pregunta
     copia = _clonar_pregunta(pregunta_banco, nuevo_orden)
 
@@ -360,38 +355,38 @@ def remover_pregunta_view(request, cuestionario_id, pregunta_id):
     DELETE /api/admin/cuestionarios/{id}/remover-pregunta/{pregunta_id}/
     """
     cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
-    
+
     cuestionario_pregunta = get_object_or_404(
         CuestionarioPregunta,
         cuestionario=cuestionario,
         pregunta_id=pregunta_id
     )
-    
+
     from core.models import Respuesta
     respuestas_count = Respuesta.objects.filter(
         cuestionario=cuestionario,
         pregunta_id=pregunta_id
     ).count()
-    
+
     if respuestas_count > 0:
         return Response({
             'success': False,
             'error': 'No se puede remover una pregunta que ya tiene respuestas',
             'respuestas_count': respuestas_count
         }, status=status.HTTP_400_BAD_REQUEST)
-    
+
     cuestionario_pregunta.delete()
-    
-    # Reordenar
+
+    # Reordenar preguntas restantes
     preguntas_restantes = CuestionarioPregunta.objects.filter(
         cuestionario=cuestionario
     ).order_by('orden')
-    
+
     for idx, cp in enumerate(preguntas_restantes, start=1):
         if cp.orden != idx:
             cp.orden = idx
             cp.save()
-    
+
     return Response({
         'success': True,
         'message': 'Pregunta removida correctamente',
@@ -405,40 +400,61 @@ def remover_pregunta_view(request, cuestionario_id, pregunta_id):
 
 def _crear_estados_para_periodo(cuestionario):
     """
-    Crea estados para todos los alumnos activos de todos los grupos del periodo
+    Crea estados PENDIENTE para todos los alumnos activos del periodo.
+
+    OPTIMIZADO:
+    - ANTES: 1 query grupos + N queries alumnos + N*M get_or_create ≈ 6,136 queries
+    - AHORA: 1 query inscripciones + 1 query existentes + 1 bulk_create = 3 queries fijas
+
+    Usa ignore_conflicts=True para ser seguro ante race conditions y
+    re-activaciones del cuestionario (no rompe estados EN_PROGRESO o COMPLETADO).
     """
-    grupos = Grupo.objects.filter(
-        periodo=cuestionario.periodo,
-        activo=True
+
+    # Todos los pares (alumno_id, grupo_id) activos del periodo en 1 JOIN
+    inscripciones = list(
+        AlumnoGrupo.objects
+        .filter(grupo__periodo=cuestionario.periodo, activo=True)
+        .values('alumno_id', 'grupo_id')
     )
-    
-    estados_creados = []
-    grupos_count = 0
-    
-    for grupo in grupos:
-        alumnos_grupo = AlumnoGrupo.objects.filter(
-            grupo=grupo,
-            activo=True
-        ).select_related('alumno')
-        
-        if alumnos_grupo.exists():
-            grupos_count += 1
-            
-            for ag in alumnos_grupo:
-                estado, created = CuestionarioEstado.objects.get_or_create(
+
+    if not inscripciones:
+        return {'total': 0, 'grupos_count': 0}
+
+    # pares que YA tienen estado para este cuestionario (evitar duplicados)
+    existentes = set(
+        CuestionarioEstado.objects
+        .filter(cuestionario=cuestionario)
+        .values_list('alumno_id', 'grupo_id')
+    )
+
+    # Construir objetos nuevos — solo los que no existen aún
+    nuevos_estados = []
+    grupos_con_alumnos = set()
+
+    for insc in inscripciones:
+        alumno_id = insc['alumno_id']
+        grupo_id = insc['grupo_id']
+        grupos_con_alumnos.add(grupo_id)
+
+        if (alumno_id, grupo_id) not in existentes:
+            nuevos_estados.append(
+                CuestionarioEstado(
                     cuestionario=cuestionario,
-                    alumno=ag.alumno,
-                    grupo=grupo,
-                    defaults={
-                        'estado': 'PENDIENTE',
-                        'progreso': 0.00
-                    }
+                    alumno_id=alumno_id,
+                    grupo_id=grupo_id,
+                    estado='PENDIENTE',
+                    progreso=0.00
                 )
-                
-                if created:
-                    estados_creados.append(estado)
-    
+            )
+
+    # insertar todo de una vez
+    if nuevos_estados:
+        CuestionarioEstado.objects.bulk_create(
+            nuevos_estados,
+            ignore_conflicts=True  # Seguro ante race conditions
+        )
+
     return {
-        'total': len(estados_creados),
-        'grupos_count': grupos_count
+        'total': len(nuevos_estados),
+        'grupos_count': len(grupos_con_alumnos)
     }
