@@ -1,12 +1,13 @@
-# core/views/periodos.py (NUEVO ARCHIVO)
+# core/views/admin/periodos.py
 """
 Endpoints para gestión de periodos
+OPTIMIZADO: SQL directo para operaciones masivas, annotations para N+1
 """
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db import transaction
+from django.db import transaction, connection
 
 from core.models import Periodo, Grupo, AlumnoGrupo
 from core.utils.decorators import require_admin
@@ -18,9 +19,9 @@ from core.utils.decorators import require_admin
 def listar_periodos_view(request):
     """
     Lista todos los periodos con su información
-    
+
     GET /api/admin/periodos/
-    
+
     Response:
     {
         "periodos": [
@@ -37,16 +38,24 @@ def listar_periodos_view(request):
         ]
     }
     """
-    periodos = Periodo.objects.all().order_by('-codigo')
-    
+    # 1 sola query con annotations en lugar de N+1 queries en loop
+    from django.db.models import Count, Q
+
+    periodos = Periodo.objects.annotate(
+        grupos_count=Count(
+            'grupos__id',
+            filter=Q(grupos__activo=True),
+            distinct=True
+        ),
+        alumnos_count=Count(
+            'grupos__alumnos__id',
+            filter=Q(grupos__alumnos__activo=True),
+            distinct=True
+        )
+    ).order_by('-codigo')
+
     periodos_data = []
     for periodo in periodos:
-        grupos_count = Grupo.objects.filter(periodo=periodo, activo=1).count()
-        alumnos_count = AlumnoGrupo.objects.filter(
-            grupo__periodo=periodo,
-            activo=1
-        ).count()
-        
         periodos_data.append({
             'id': periodo.id,
             'codigo': periodo.codigo,
@@ -54,10 +63,10 @@ def listar_periodos_view(request):
             'activo': periodo.activo == 1,
             'fecha_inicio': periodo.fecha_inicio.isoformat() if periodo.fecha_inicio else None,
             'fecha_fin': periodo.fecha_fin.isoformat() if periodo.fecha_fin else None,
-            'grupos_count': grupos_count,
-            'alumnos_count': alumnos_count,
+            'grupos_count': periodo.grupos_count,
+            'alumnos_count': periodo.alumnos_count,
         })
-    
+
     return Response({
         'periodos': periodos_data
     }, status=status.HTTP_200_OK)
@@ -69,14 +78,14 @@ def listar_periodos_view(request):
 def activar_periodo_view(request, periodo_id):
     """
     Activa un periodo y desactiva todos los demás
-    
+
     POST /api/admin/periodos/{periodo_id}/activar/
-    
+
     Body (opcional):
     {
         "desactivar_otros": true  // Default: true
     }
-    
+
     Response:
     {
         "success": true,
@@ -89,7 +98,9 @@ def activar_periodo_view(request, periodo_id):
         "cambios": {
             "periodos_desactivados": 3,
             "grupos_desactivados": 500,
-            "inscripciones_desactivadas": 10000
+            "inscripciones_desactivadas": 10000,
+            "grupos_reactivados": 235,
+            "inscripciones_reactivadas": 5904
         }
     }
     """
@@ -100,48 +111,77 @@ def activar_periodo_view(request, periodo_id):
             {'error': 'Periodo no encontrado'},
             status=status.HTTP_404_NOT_FOUND
         )
-    
+
     desactivar_otros = request.data.get('desactivar_otros', True)
-    
+
     cambios = {
         'periodos_desactivados': 0,
         'grupos_desactivados': 0,
         'inscripciones_desactivadas': 0,
-        'grupos_reactivados': 0,  # ← NUEVO
-        'inscripciones_reactivadas': 0,  # ← NUEVO
+        'grupos_reactivados': 0,
+        'inscripciones_reactivadas': 0,
     }
-    
+
     with transaction.atomic():
-        # 1. ACTIVAR EL PERIODO SELECCIONADO
-        Periodo.objects.filter(id=periodo_id).update(activo=1)
-        
-        # 2. REACTIVAR GRUPOS E INSCRIPCIONES DEL PERIODO ← NUEVO
-        cambios['grupos_reactivados'] = Grupo.objects.filter(
-            periodo_id=periodo_id
-        ).update(activo=1)
-        
-        cambios['inscripciones_reactivadas'] = AlumnoGrupo.objects.filter(
-            grupo__periodo_id=periodo_id
-        ).update(activo=1)
-        
-        # 3. DESACTIVAR LOS DEMÁS (si se pidió)
-        if desactivar_otros:
-            cambios['periodos_desactivados'] = Periodo.objects.exclude(
-                id=periodo_id
-            ).filter(activo=1).update(activo=0)
-            
-            cambios['grupos_desactivados'] = Grupo.objects.filter(
-                periodo__activo=0,
-                activo=1
-            ).update(activo=0)
-            
-            cambios['inscripciones_desactivadas'] = AlumnoGrupo.objects.filter(
-                grupo__periodo__activo=0,
-                activo=1
-            ).update(activo=0)
-    
+        with connection.cursor() as cursor:
+
+            # 1. ACTIVAR EL PERIODO SELECCIONADO
+            cursor.execute(
+                "UPDATE periodos SET activo = 1 WHERE id = %s",
+                [periodo_id]
+            )
+
+            # 2. REACTIVAR GRUPOS DEL PERIODO SELECCIONADO
+            # SQL directo evita subquery anidada de Django ORM
+            cursor.execute(
+                "UPDATE grupos SET activo = 1 WHERE periodo_id = %s",
+                [periodo_id]
+            )
+            cambios['grupos_reactivados'] = cursor.rowcount
+
+            # 3. REACTIVAR INSCRIPCIONES DEL PERIODO SELECCIONADO
+            # JOIN directo: mucho más eficiente que la subquery anidada del ORM
+            cursor.execute("""
+                UPDATE alumno_grupo ag
+                INNER JOIN grupos g ON ag.grupo_id = g.id
+                SET ag.activo = 1
+                WHERE g.periodo_id = %s
+            """, [periodo_id])
+            cambios['inscripciones_reactivadas'] = cursor.rowcount
+
+            if desactivar_otros:
+                # 4. DESACTIVAR PERIODOS (excluyendo el activado)
+                cursor.execute(
+                    "UPDATE periodos SET activo = 0 WHERE id != %s AND activo = 1",
+                    [periodo_id]
+                )
+                cambios['periodos_desactivados'] = cursor.rowcount
+
+                # 5. DESACTIVAR GRUPOS DE PERIODOS INACTIVOS
+                # JOIN directo en lugar de subquery anidada
+                cursor.execute("""
+                    UPDATE grupos g
+                    INNER JOIN periodos p ON g.periodo_id = p.id
+                    SET g.activo = 0
+                    WHERE p.activo = 0
+                      AND g.activo = 1
+                """)
+                cambios['grupos_desactivados'] = cursor.rowcount
+
+                # 6. DESACTIVAR INSCRIPCIONES DE GRUPOS INACTIVOS
+                # JOIN de 3 tablas directo — el más costoso, ahora eficiente
+                cursor.execute("""
+                    UPDATE alumno_grupo ag
+                    INNER JOIN grupos g ON ag.grupo_id = g.id
+                    INNER JOIN periodos p ON g.periodo_id = p.id
+                    SET ag.activo = 0
+                    WHERE p.activo = 0
+                      AND ag.activo = 1
+                """)
+                cambios['inscripciones_desactivadas'] = cursor.rowcount
+
     periodo.refresh_from_db()
-    
+
     return Response({
         'success': True,
         'periodo': {
@@ -160,9 +200,9 @@ def activar_periodo_view(request, periodo_id):
 def desactivar_periodo_view(request, periodo_id):
     """
     Desactiva un periodo específico
-    
+
     POST /api/admin/periodos/{periodo_id}/desactivar/
-    
+
     Response:
     {
         "success": true,
@@ -185,31 +225,41 @@ def desactivar_periodo_view(request, periodo_id):
             {'error': 'Periodo no encontrado'},
             status=status.HTTP_404_NOT_FOUND
         )
-    
+
     cambios = {
         'grupos_desactivados': 0,
         'inscripciones_desactivadas': 0,
     }
-    
+
     with transaction.atomic():
-        # Desactivar el periodo
-        Periodo.objects.filter(id=periodo_id).update(activo=0)
-        
-        # Desactivar sus grupos
-        cambios['grupos_desactivados'] = Grupo.objects.filter(
-            periodo_id=periodo_id,
-            activo=1
-        ).update(activo=0)
-        
-        # Desactivar sus inscripciones
-        cambios['inscripciones_desactivadas'] = AlumnoGrupo.objects.filter(
-            grupo__periodo_id=periodo_id,
-            activo=1
-        ).update(activo=0)
-    
-    # Refrescar el objeto periodo
+        with connection.cursor() as cursor:
+
+            # 1. DESACTIVAR EL PERIODO
+            cursor.execute(
+                "UPDATE periodos SET activo = 0 WHERE id = %s",
+                [periodo_id]
+            )
+
+            # 2. DESACTIVAR GRUPOS DEL PERIODO
+            cursor.execute(
+                "UPDATE grupos SET activo = 0 WHERE periodo_id = %s AND activo = 1",
+                [periodo_id]
+            )
+            cambios['grupos_desactivados'] = cursor.rowcount
+
+            # 3. DESACTIVAR INSCRIPCIONES DEL PERIODO
+            # JOIN directo en lugar de subquery anidada del ORM
+            cursor.execute("""
+                UPDATE alumno_grupo ag
+                INNER JOIN grupos g ON ag.grupo_id = g.id
+                SET ag.activo = 0
+                WHERE g.periodo_id = %s
+                  AND ag.activo = 1
+            """, [periodo_id])
+            cambios['inscripciones_desactivadas'] = cursor.rowcount
+
     periodo.refresh_from_db()
-    
+
     return Response({
         'success': True,
         'periodo': {
@@ -228,16 +278,16 @@ def desactivar_periodo_view(request, periodo_id):
 def crear_periodo_view(request):
     """
     Crea un nuevo periodo
-    
+
     POST /api/admin/periodos/crear/
-    
+
     Body:
     {
         "anio": 2026,
         "numero": 2,  // 1, 2 o 3
         "activar_inmediatamente": false  // Opcional, default: false
     }
-    
+
     Response:
     {
         "success": true,
@@ -257,24 +307,23 @@ def crear_periodo_view(request):
         generar_nombre_periodo,
         generar_fechas_periodo
     )
-    
-    # Validar datos
+
     anio = request.data.get('anio')
     numero = request.data.get('numero')
     activar_inmediatamente = request.data.get('activar_inmediatamente', False)
-    
+
     if not anio or not numero:
         return Response(
             {'error': 'Se requieren los campos: anio y numero'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     if numero not in [1, 2, 3]:
         return Response(
             {'error': 'El número de periodo debe ser 1, 2 o 3'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     try:
         anio = int(anio)
         numero = int(numero)
@@ -283,13 +332,11 @@ def crear_periodo_view(request):
             {'error': 'Año y número deben ser enteros'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
-    # Generar datos del periodo
+
     codigo = generar_codigo_periodo(anio, numero)
     nombre = generar_nombre_periodo(anio, numero)
     fecha_inicio, fecha_fin = generar_fechas_periodo(anio, numero)
-    
-    # Verificar si ya existe
+
     if Periodo.objects.filter(codigo=codigo).exists():
         periodo_existente = Periodo.objects.get(codigo=codigo)
         return Response(
@@ -306,23 +353,39 @@ def crear_periodo_view(request):
             },
             status=status.HTTP_400_BAD_REQUEST
         )
-    
-    # Crear periodo
+
     with transaction.atomic():
-        periodo = Periodo.objects.create(
-            codigo=codigo,
-            nombre=nombre,
-            fecha_inicio=fecha_inicio,
-            fecha_fin=fecha_fin,
-            activo=1 if activar_inmediatamente else 0
-        )
-        
-        # Si se debe activar inmediatamente, desactivar los demás
-        if activar_inmediatamente:
-            Periodo.objects.exclude(id=periodo.id).update(activo=0)
-            Grupo.objects.filter(periodo__activo=0, activo=1).update(activo=0)
-            AlumnoGrupo.objects.filter(grupo__periodo__activo=0, activo=1).update(activo=0)
-    
+        with connection.cursor() as cursor:
+            periodo = Periodo.objects.create(
+                codigo=codigo,
+                nombre=nombre,
+                fecha_inicio=fecha_inicio,
+                fecha_fin=fecha_fin,
+                activo=1 if activar_inmediatamente else 0
+            )
+
+            if activar_inmediatamente:
+                # Desactivar periodos
+                cursor.execute(
+                    "UPDATE periodos SET activo = 0 WHERE id != %s AND activo = 1",
+                    [periodo.id]
+                )
+                # Desactivar grupos de periodos inactivos
+                cursor.execute("""
+                    UPDATE grupos g
+                    INNER JOIN periodos p ON g.periodo_id = p.id
+                    SET g.activo = 0
+                    WHERE p.activo = 0 AND g.activo = 1
+                """)
+                # Desactivar inscripciones
+                cursor.execute("""
+                    UPDATE alumno_grupo ag
+                    INNER JOIN grupos g ON ag.grupo_id = g.id
+                    INNER JOIN periodos p ON g.periodo_id = p.id
+                    SET ag.activo = 0
+                    WHERE p.activo = 0 AND ag.activo = 1
+                """)
+
     return Response({
         'success': True,
         'periodo': {
@@ -342,9 +405,9 @@ def crear_periodo_view(request):
 def obtener_periodo_activo_view(request):
     """
     Obtiene el periodo actualmente activo
-    
+
     GET /api/periodos/activo/
-    
+
     Response:
     {
         "periodo": {
@@ -359,7 +422,7 @@ def obtener_periodo_activo_view(request):
     """
     try:
         periodo = Periodo.objects.get(activo=1)
-        
+
         return Response({
             'periodo': {
                 'id': periodo.id,
@@ -370,16 +433,15 @@ def obtener_periodo_activo_view(request):
                 'fecha_fin': periodo.fecha_fin.isoformat() if periodo.fecha_fin else None,
             }
         }, status=status.HTTP_200_OK)
-        
+
     except Periodo.DoesNotExist:
         return Response(
             {'error': 'No hay ningún periodo activo'},
             status=status.HTTP_404_NOT_FOUND
         )
     except Periodo.MultipleObjectsReturned:
-        # Si hay múltiples activos, tomar el más reciente
         periodo = Periodo.objects.filter(activo=1).order_by('-codigo').first()
-        
+
         return Response({
             'periodo': {
                 'id': periodo.id,
