@@ -1,15 +1,11 @@
 # core/views/comite/dashboard.py
 """
 Endpoints para Comité - Dashboard Global (Solo Lectura)
-
-GET /api/comite/overview  — resumen ejecutivo global
-GET /api/comite/graphs    — datos para graficas
 """
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.shortcuts import get_object_or_404
 from django.db.models import Count, Sum, Case, When, IntegerField, Q
 
 from core.models import (
@@ -17,21 +13,17 @@ from core.models import (
     Periodo, AlumnoGrupo
 )
 from core.utils.decorators import require_comite_readonly
-from core.views.academic.cuestionarios import (
-    _calcular_nodos_sociograma,
-    _clasificar_alumno,
-)
+from core.views.academic.cuestionarios import _clasificar_alumno
+from core.views.comite.helpers import _calcular_nodos_batch
 
+# ============================================================
+# HELPER: resolver cuestionario (sin cambios)
+# ============================================================
 
 def _resolver_cuestionario(periodo_id=None, cuestionario_id=None):
     """
-    Resuelve qué cuestionario usar según los parámetros:
-    - cuestionario_id → ese cuestionario específico (activo o no)
-    - periodo_id      → cuestionario activo de ese periodo
-    - ninguno         → cuestionario activo del periodo activo
-
+    Resuelve qué cuestionario usar según los parámetros.
     Retorna: (cuestionario, periodo, error_response)
-    Si hay error retorna (None, None, Response)
     """
     if cuestionario_id:
         cuestionario = Cuestionario.objects.select_related('periodo').filter(
@@ -52,7 +44,6 @@ def _resolver_cuestionario(periodo_id=None, cuestionario_id=None):
                 status=status.HTTP_404_NOT_FOUND
             )
     else:
-        # Default: periodo activo
         try:
             periodo = Periodo.objects.get(activo=1)
         except Periodo.DoesNotExist:
@@ -81,7 +72,7 @@ def _resolver_cuestionario(periodo_id=None, cuestionario_id=None):
 
 
 def _aplicar_filtros_grupos(grupos_qs, division_id=None, tutor_id=None, grupo_id=None):
-    """Aplica filtros opcionales a un queryset de grupos"""
+    """Aplica filtros opcionales a un queryset de grupos."""
     if division_id:
         grupos_qs = grupos_qs.filter(programa__division_id=division_id)
     if tutor_id:
@@ -91,72 +82,68 @@ def _aplicar_filtros_grupos(grupos_qs, division_id=None, tutor_id=None, grupo_id
     return grupos_qs
 
 
+def _build_filtros_aplicados(division_id, tutor_id, grupo_id, periodo_id, cuestionario_id):
+    """Construye el dict de filtros aplicados."""
+    filtros = {}
+    if division_id:
+        filtros['division_id'] = division_id
+    if tutor_id:
+        filtros['tutor_id'] = tutor_id
+    if grupo_id:
+        filtros['grupo_id'] = grupo_id
+    if periodo_id:
+        filtros['periodo_id'] = periodo_id
+    if cuestionario_id:
+        filtros['cuestionario_id'] = cuestionario_id
+    return filtros
+
+# ============================================================
+# VISTAS
+# ============================================================
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 @require_comite_readonly
 def overview_comite_view(request):
     """
     Resumen ejecutivo global para el Comité.
-
     GET /api/comite/overview
 
     Query params (todos opcionales):
-    - periodo_id      : ver periodo histórico específico
-    - cuestionario_id : ver cuestionario específico (activo o no)
-    - division_id     : filtrar por división
-    - tutor_id        : filtrar por tutor
-    - grupo_id        : filtrar por grupo específico
-
-    Default: periodo activo + cuestionario activo de ese periodo
+    - periodo_id, cuestionario_id, division_id, tutor_id, grupo_id
 
     Response:
     {
-        "cuestionario": { "id": 1, "titulo": "...", "activo": true },
-        "periodo": { "id": 1, "codigo": "2026-1", "nombre": "..." },
+        "cuestionario": { "id", "titulo", "activo" },
+        "periodo": { "id", "codigo", "nombre" },
         "filtros_aplicados": {},
         "total_grupos": 45,
         "porcentaje_completado_global": 72.5,
         "alertas_aislados": {
             "total_global": 12,
-            "por_division": [ { "division_id": 1, "division": "TI", "total_aislados": 7 } ],
-            "por_grupo": [ { "grupo_id": 1, "grupo_clave": "IDGS-5-A", "division": "TI", "total_aislados": 3 } ]
+            "por_division": [ { "division_id", "division", "total_aislados" } ],
+            "por_grupo": [ { "grupo_id", "grupo_clave", "division", "total_aislados" } ]
         },
         "top_centralidad": {
-            "por_division": [
-                {
-                    "division_id": 1,
-                    "division": "TI",
-                    "top": [ { "alumno_id": 1, "nombre": "...", "matricula": "...", "elecciones_positivas": 24, "grupo": "IDGS-5-A" } ]
-                }
-            ],
-            "por_grupo": [
-                {
-                    "grupo_id": 1,
-                    "grupo_clave": "IDGS-5-A",
-                    "top": [ { "alumno_id": 1, "nombre": "...", "matricula": "...", "elecciones_positivas": 18 } ]
-                }
-            ]
+            "por_division": [ { "division_id", "division", "top": [...] } ],
+            "por_grupo": [ { "grupo_id", "grupo_clave", "top": [...] } ]
         }
     }
     """
-    # Resolver parámetros
-    periodo_id = request.query_params.get('periodo_id')
+    periodo_id      = request.query_params.get('periodo_id')
     cuestionario_id = request.query_params.get('cuestionario_id')
-    division_id = request.query_params.get('division_id')
-    tutor_id = request.query_params.get('tutor_id')
-    grupo_id = request.query_params.get('grupo_id')
+    division_id     = request.query_params.get('division_id')
+    tutor_id        = request.query_params.get('tutor_id')
+    grupo_id        = request.query_params.get('grupo_id')
 
-    # Resolver cuestionario
     cuestionario, periodo, error = _resolver_cuestionario(periodo_id, cuestionario_id)
     if error:
         return error
 
-    # Obtener grupos con filtros
     grupos_qs = Grupo.objects.filter(
         periodo=periodo,
         activo=True
     ).select_related('programa', 'programa__division', 'tutor', 'tutor__user')
-
     grupos_qs = _aplicar_filtros_grupos(grupos_qs, division_id, tutor_id, grupo_id)
 
     if not grupos_qs.exists():
@@ -165,11 +152,10 @@ def overview_comite_view(request):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    grupos_ids = list(grupos_qs.values_list('id', flat=True))
+    grupos_list = list(grupos_qs)
+    grupos_ids  = [g.id for g in grupos_list]
 
-    # ============================================
-    # PORCENTAJE COMPLETADO GLOBAL — una sola query
-    # ============================================
+    # ── Porcentaje completado global ── 1 query ──────────────────────────────
     estados_agg = CuestionarioEstado.objects.filter(
         cuestionario=cuestionario,
         grupo_id__in=grupos_ids
@@ -177,203 +163,134 @@ def overview_comite_view(request):
         total=Count('id'),
         completados=Count(Case(When(estado='COMPLETADO', then=1), output_field=IntegerField()))
     )
-
-    total_estados = estados_agg['total'] or 0
+    total_estados    = estados_agg['total'] or 0
     total_completados = estados_agg['completados'] or 0
     porcentaje_global = round(total_completados / total_estados * 100, 2) if total_estados > 0 else 0
 
-    # ============================================
-    # ALERTAS DE AISLADOS — calcular nodos por grupo
-    # ============================================
-    alertas_por_grupo = []
+    # ── Nodos en batch ── ~6 queries totales ────────────────────────────────
+    nodos_por_grupo = _calcular_nodos_batch(cuestionario, grupos_list)
+    # ── Construir alertas y centralidad en memoria ────────────────────────
+    alertas_por_grupo  = []
     alertas_por_division = {}
     total_aislados_global = 0
 
-    for grupo in grupos_qs:
-        nodos_data = _calcular_nodos_sociograma(cuestionario, grupo)
-        aislados = [n for n in nodos_data['nodos'] if n['tipo'] == 'INVISIBLE']
-        total_aislados = len(aislados)
+    # Para centralidad: acumular alumnos con su puntos_positivos por división y grupo
+    top_por_division = {}  # division_id → { division_id, division, alumnos: [] }
+    top_por_grupo_dict = {}  # grupo_id → { grupo_id, grupo_clave, alumnos: [] }
 
-        if total_aislados > 0:
-            division_nombre = grupo.programa.division.nombre if grupo.programa and grupo.programa.division else 'Sin división'
-            division_id_grupo = grupo.programa.division.id if grupo.programa and grupo.programa.division else None
-
-            alertas_por_grupo.append({
-                'grupo_id': grupo.id,
-                'grupo_clave': grupo.clave,
-                'division': division_nombre,
-                'total_aislados': total_aislados,
-            })
-
-            total_aislados_global += total_aislados
-
-            # Acumular por division
-            key = division_id_grupo
-            if key not in alertas_por_division:
-                alertas_por_division[key] = {
-                    'division_id': division_id_grupo,
-                    'division': division_nombre,
-                    'total_aislados': 0
-                }
-            alertas_por_division[key]['total_aislados'] += total_aislados
-
-    # ============================================
-    # TOP CENTRALIDAD (positivas) — una query batch
-    # ============================================
-    preguntas_positivas_ids = list(
-        cuestionario.preguntas.filter(
-            pregunta__tipo='SELECCION_ALUMNO',
-            pregunta__polaridad='POSITIVA'
-        ).values_list('pregunta_id', flat=True)
-    )
-
-    alumnos_ids = list(
-        AlumnoGrupo.objects.filter(
-            grupo_id__in=grupos_ids,
-            activo=True
-        ).values_list('alumno_id', flat=True)
-    )
-
-    # Elecciones positivas recibidas por alumno — una sola query
-    elecciones_qs = Respuesta.objects.filter(
-        cuestionario=cuestionario,
-        pregunta_id__in=preguntas_positivas_ids,
-        seleccionado_alumno_id__in=alumnos_ids
-    ).values('seleccionado_alumno_id').annotate(
-        elecciones_positivas=Count('id')
-    )
-
-    elecciones_map = {
-        e['seleccionado_alumno_id']: e['elecciones_positivas']
-        for e in elecciones_qs
-    }
-
-    # Mapear alumno → grupo y datos básicos
-    alumno_grupo_map = {}
-    for grupo in grupos_qs:
-        ags = AlumnoGrupo.objects.filter(
-            grupo=grupo,
-            activo=True
-        ).select_related('alumno', 'alumno__user')
+    for grupo in grupos_list:
+        gid   = grupo.id
+        datos = nodos_por_grupo.get(gid, {'nodos': [], 'total_alumnos': 0, 'respuestas_completas': 0})
+        nodos = datos['nodos']
 
         division_nombre = grupo.programa.division.nombre if grupo.programa and grupo.programa.division else 'Sin división'
-        division_id_val = grupo.programa.division.id if grupo.programa and grupo.programa.division else None
+        division_id_val = grupo.programa.division.id    if grupo.programa and grupo.programa.division else None
 
-        for ag in ags:
-            alumno = ag.alumno
-            alumno_grupo_map[alumno.id] = {
-                'alumno_id': alumno.id,
-                'nombre': alumno.user.nombre_completo,
-                'matricula': alumno.matricula,
-                'elecciones_positivas': elecciones_map.get(alumno.id, 0),
-                'grupo_id': grupo.id,
-                'grupo_clave': grupo.clave,
+        # Alertas
+        aislados = [n for n in nodos if n['tipo'] == 'INVISIBLE']
+        if aislados:
+            alertas_por_grupo.append({
+                'grupo_id':       gid,
+                'grupo_clave':    grupo.clave,
+                'division':       division_nombre,
+                'total_aislados': len(aislados),
+            })
+            total_aislados_global += len(aislados)
+
+            key = division_id_val
+            if key not in alertas_por_division:
+                alertas_por_division[key] = {
+                    'division_id':    division_id_val,
+                    'division':       division_nombre,
+                    'total_aislados': 0
+                }
+            alertas_por_division[key]['total_aislados'] += len(aislados)
+
+        # Centralidad — acumular por división
+        if division_id_val not in top_por_division:
+            top_por_division[division_id_val] = {
                 'division_id': division_id_val,
-                'division': division_nombre,
+                'division':    division_nombre,
+                'alumnos':     []
             }
+        # Centralidad — acumular por grupo
+        if gid not in top_por_grupo_dict:
+            top_por_grupo_dict[gid] = {
+                'grupo_id':    gid,
+                'grupo_clave': grupo.clave,
+                'alumnos':     []
+            }
+
+        for nodo in nodos:
+            entrada = {
+                'alumno_id':           nodo['alumno_id'],
+                'nombre':              nodo['nombre'],
+                'matricula':           nodo['matricula'],
+                'elecciones_positivas': nodo['puntos_positivos'],
+                'grupo_clave':         grupo.clave,
+            }
+            top_por_division[division_id_val]['alumnos'].append(entrada)
+            top_por_grupo_dict[gid]['alumnos'].append(entrada)
 
     # Top 10 por división
-    top_por_division = {}
-    for alumno_data in alumno_grupo_map.values():
-        div_id = alumno_data['division_id']
-        if div_id not in top_por_division:
-            top_por_division[div_id] = {
-                'division_id': div_id,
-                'division': alumno_data['division'],
-                'alumnos': []
-            }
-        top_por_division[div_id]['alumnos'].append(alumno_data)
-
     top_centralidad_division = []
     for div_data in top_por_division.values():
-        top_10 = sorted(
-            div_data['alumnos'],
-            key=lambda x: x['elecciones_positivas'],
-            reverse=True
-        )[:10]
+        top_10 = sorted(div_data['alumnos'], key=lambda x: x['elecciones_positivas'], reverse=True)[:10]
         top_centralidad_division.append({
             'division_id': div_data['division_id'],
-            'division': div_data['division'],
+            'division':    div_data['division'],
             'top': [
                 {
-                    'alumno_id': a['alumno_id'],
-                    'nombre': a['nombre'],
-                    'matricula': a['matricula'],
+                    'alumno_id':           a['alumno_id'],
+                    'nombre':              a['nombre'],
+                    'matricula':           a['matricula'],
                     'elecciones_positivas': a['elecciones_positivas'],
-                    'grupo': a['grupo_clave'],
+                    'grupo':               a['grupo_clave'],
                 }
                 for a in top_10
             ]
         })
 
     # Top 10 por grupo
-    top_por_grupo_dict = {}
-    for alumno_data in alumno_grupo_map.values():
-        g_id = alumno_data['grupo_id']
-        if g_id not in top_por_grupo_dict:
-            top_por_grupo_dict[g_id] = {
-                'grupo_id': g_id,
-                'grupo_clave': alumno_data['grupo_clave'],
-                'alumnos': []
-            }
-        top_por_grupo_dict[g_id]['alumnos'].append(alumno_data)
-
     top_centralidad_grupo = []
     for grp_data in top_por_grupo_dict.values():
-        top_10 = sorted(
-            grp_data['alumnos'],
-            key=lambda x: x['elecciones_positivas'],
-            reverse=True
-        )[:10]
+        top_10 = sorted(grp_data['alumnos'], key=lambda x: x['elecciones_positivas'], reverse=True)[:10]
         top_centralidad_grupo.append({
-            'grupo_id': grp_data['grupo_id'],
+            'grupo_id':    grp_data['grupo_id'],
             'grupo_clave': grp_data['grupo_clave'],
             'top': [
                 {
-                    'alumno_id': a['alumno_id'],
-                    'nombre': a['nombre'],
-                    'matricula': a['matricula'],
+                    'alumno_id':           a['alumno_id'],
+                    'nombre':              a['nombre'],
+                    'matricula':           a['matricula'],
                     'elecciones_positivas': a['elecciones_positivas'],
                 }
                 for a in top_10
             ]
         })
 
-    # Filtros aplicados
-    filtros_aplicados = {}
-    if division_id:
-        filtros_aplicados['division_id'] = division_id
-    if tutor_id:
-        filtros_aplicados['tutor_id'] = tutor_id
-    if grupo_id:
-        filtros_aplicados['grupo_id'] = grupo_id
-    if periodo_id:
-        filtros_aplicados['periodo_id'] = periodo_id
-    if cuestionario_id:
-        filtros_aplicados['cuestionario_id'] = cuestionario_id
-
     return Response({
         'cuestionario': {
-            'id': cuestionario.id,
+            'id':     cuestionario.id,
             'titulo': cuestionario.titulo,
             'activo': cuestionario.activo,
         },
         'periodo': {
-            'id': periodo.id,
+            'id':     periodo.id,
             'codigo': periodo.codigo,
             'nombre': periodo.nombre,
         },
-        'filtros_aplicados': filtros_aplicados,
-        'total_grupos': len(grupos_ids),
+        'filtros_aplicados':          _build_filtros_aplicados(division_id, tutor_id, grupo_id, periodo_id, cuestionario_id),
+        'total_grupos':               len(grupos_ids),
         'porcentaje_completado_global': porcentaje_global,
         'alertas_aislados': {
-            'total_global': total_aislados_global,
-            'por_division': list(alertas_por_division.values()),
-            'por_grupo': alertas_por_grupo,
+            'total_global':  total_aislados_global,
+            'por_division':  list(alertas_por_division.values()),
+            'por_grupo':     alertas_por_grupo,
         },
         'top_centralidad': {
             'por_division': top_centralidad_division,
-            'por_grupo': top_centralidad_grupo,
+            'por_grupo':    top_centralidad_grupo,
         }
     }, status=status.HTTP_200_OK)
 
@@ -384,7 +301,6 @@ def overview_comite_view(request):
 def progreso_overview_comite_view(request):
     """
     Porcentaje de completado global del cuestionario.
-
     GET /api/comite/overview/progreso/
 
     Query params (todos opcionales):
@@ -392,8 +308,8 @@ def progreso_overview_comite_view(request):
 
     Response:
     {
-        "cuestionario": { "id": 1, "titulo": "...", "activo": true },
-        "periodo": { "id": 1, "codigo": "2026-1" },
+        "cuestionario": { "id", "titulo", "activo" },
+        "periodo": { "id", "codigo", "nombre" },
         "filtros_aplicados": {},
         "total_grupos": 45,
         "total_alumnos": 1200,
@@ -401,11 +317,11 @@ def progreso_overview_comite_view(request):
         "porcentaje_completado_global": 72.5
     }
     """
-    periodo_id = request.query_params.get('periodo_id')
+    periodo_id      = request.query_params.get('periodo_id')
     cuestionario_id = request.query_params.get('cuestionario_id')
-    division_id = request.query_params.get('division_id')
-    tutor_id = request.query_params.get('tutor_id')
-    grupo_id = request.query_params.get('grupo_id')
+    division_id     = request.query_params.get('division_id')
+    tutor_id        = request.query_params.get('tutor_id')
+    grupo_id        = request.query_params.get('grupo_id')
 
     cuestionario, periodo, error = _resolver_cuestionario(periodo_id, cuestionario_id)
     if error:
@@ -415,7 +331,6 @@ def progreso_overview_comite_view(request):
         periodo=periodo,
         activo=True
     ).select_related('programa', 'programa__division')
-
     grupos_qs = _aplicar_filtros_grupos(grupos_qs, division_id, tutor_id, grupo_id)
 
     if not grupos_qs.exists():
@@ -426,6 +341,7 @@ def progreso_overview_comite_view(request):
 
     grupos_ids = list(grupos_qs.values_list('id', flat=True))
 
+    # 1 query
     estados_agg = CuestionarioEstado.objects.filter(
         cuestionario=cuestionario,
         grupo_id__in=grupos_ids
@@ -434,37 +350,25 @@ def progreso_overview_comite_view(request):
         completados=Count(Case(When(estado='COMPLETADO', then=1), output_field=IntegerField()))
     )
 
-    total = estados_agg['total'] or 0
+    total      = estados_agg['total'] or 0
     completados = estados_agg['completados'] or 0
     porcentaje = round(completados / total * 100, 2) if total > 0 else 0
 
-    filtros_aplicados = {}
-    if division_id:
-        filtros_aplicados['division_id'] = division_id
-    if tutor_id:
-        filtros_aplicados['tutor_id'] = tutor_id
-    if grupo_id:
-        filtros_aplicados['grupo_id'] = grupo_id
-    if periodo_id:
-        filtros_aplicados['periodo_id'] = periodo_id
-    if cuestionario_id:
-        filtros_aplicados['cuestionario_id'] = cuestionario_id
-
     return Response({
         'cuestionario': {
-            'id': cuestionario.id,
+            'id':     cuestionario.id,
             'titulo': cuestionario.titulo,
             'activo': cuestionario.activo,
         },
         'periodo': {
-            'id': periodo.id,
+            'id':     periodo.id,
             'codigo': periodo.codigo,
             'nombre': periodo.nombre,
         },
-        'filtros_aplicados': filtros_aplicados,
-        'total_grupos': len(grupos_ids),
-        'total_alumnos': total,
-        'total_completados': completados,
+        'filtros_aplicados':            _build_filtros_aplicados(division_id, tutor_id, grupo_id, periodo_id, cuestionario_id),
+        'total_grupos':                 len(grupos_ids),
+        'total_alumnos':                total,
+        'total_completados':            completados,
         'porcentaje_completado_global': porcentaje,
     }, status=status.HTTP_200_OK)
 
@@ -475,7 +379,6 @@ def progreso_overview_comite_view(request):
 def alertas_comite_view(request):
     """
     Alertas de alumnos aislados (INVISIBLE) por división y por grupo.
-
     GET /api/comite/overview/alertas/
 
     Query params (todos opcionales):
@@ -483,25 +386,21 @@ def alertas_comite_view(request):
 
     Response:
     {
-        "cuestionario": { "id": 1, "titulo": "...", "activo": true },
-        "periodo": { "id": 1, "codigo": "2026-1" },
+        "cuestionario": { "id", "titulo", "activo" },
+        "periodo": { "id", "codigo", "nombre" },
         "filtros_aplicados": {},
         "alertas_aislados": {
             "total_global": 12,
-            "por_division": [
-                { "division_id": 1, "division": "TI", "total_aislados": 7 }
-            ],
-            "por_grupo": [
-                { "grupo_id": 1, "grupo_clave": "IDGS-5-A", "division": "TI", "total_aislados": 3 }
-            ]
+            "por_division": [ { "division_id", "division", "total_aislados" } ],
+            "por_grupo": [ { "grupo_id", "grupo_clave", "division", "total_aislados" } ]
         }
     }
     """
-    periodo_id = request.query_params.get('periodo_id')
+    periodo_id      = request.query_params.get('periodo_id')
     cuestionario_id = request.query_params.get('cuestionario_id')
-    division_id = request.query_params.get('division_id')
-    tutor_id = request.query_params.get('tutor_id')
-    grupo_id = request.query_params.get('grupo_id')
+    division_id     = request.query_params.get('division_id')
+    tutor_id        = request.query_params.get('tutor_id')
+    grupo_id        = request.query_params.get('grupo_id')
 
     cuestionario, periodo, error = _resolver_cuestionario(periodo_id, cuestionario_id)
     if error:
@@ -511,7 +410,6 @@ def alertas_comite_view(request):
         periodo=periodo,
         activo=True
     ).select_related('programa', 'programa__division')
-
     grupos_qs = _aplicar_filtros_grupos(grupos_qs, division_id, tutor_id, grupo_id)
 
     if not grupos_qs.exists():
@@ -520,65 +418,58 @@ def alertas_comite_view(request):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    alertas_por_grupo = []
+    grupos_list = list(grupos_qs)
+
+    # Batch: ~6 queries para todos los grupos
+    nodos_por_grupo = _calcular_nodos_batch(cuestionario, grupos_list)
+
+    alertas_por_grupo    = []
     alertas_por_division = {}
     total_aislados_global = 0
 
-    for grupo in grupos_qs:
-        nodos_data = _calcular_nodos_sociograma(cuestionario, grupo)
-        aislados = [n for n in nodos_data['nodos'] if n['tipo'] == 'INVISIBLE']
-        total_aislados = len(aislados)
+    for grupo in grupos_list:
+        nodos = nodos_por_grupo.get(grupo.id, {}).get('nodos', [])
+        aislados = [n for n in nodos if n['tipo'] == 'INVISIBLE']
 
-        if total_aislados > 0:
-            division_nombre = grupo.programa.division.nombre if grupo.programa and grupo.programa.division else 'Sin división'
-            division_id_grupo = grupo.programa.division.id if grupo.programa and grupo.programa.division else None
+        if not aislados:
+            continue
 
-            alertas_por_grupo.append({
-                'grupo_id': grupo.id,
-                'grupo_clave': grupo.clave,
-                'division': division_nombre,
-                'total_aislados': total_aislados,
-            })
+        division_nombre = grupo.programa.division.nombre if grupo.programa and grupo.programa.division else 'Sin división'
+        division_id_val = grupo.programa.division.id    if grupo.programa and grupo.programa.division else None
 
-            total_aislados_global += total_aislados
+        alertas_por_grupo.append({
+            'grupo_id':       grupo.id,
+            'grupo_clave':    grupo.clave,
+            'division':       division_nombre,
+            'total_aislados': len(aislados),
+        })
+        total_aislados_global += len(aislados)
 
-            key = division_id_grupo
-            if key not in alertas_por_division:
-                alertas_por_division[key] = {
-                    'division_id': division_id_grupo,
-                    'division': division_nombre,
-                    'total_aislados': 0
-                }
-            alertas_por_division[key]['total_aislados'] += total_aislados
-
-    filtros_aplicados = {}
-    if division_id:
-        filtros_aplicados['division_id'] = division_id
-    if tutor_id:
-        filtros_aplicados['tutor_id'] = tutor_id
-    if grupo_id:
-        filtros_aplicados['grupo_id'] = grupo_id
-    if periodo_id:
-        filtros_aplicados['periodo_id'] = periodo_id
-    if cuestionario_id:
-        filtros_aplicados['cuestionario_id'] = cuestionario_id
+        key = division_id_val
+        if key not in alertas_por_division:
+            alertas_por_division[key] = {
+                'division_id':    division_id_val,
+                'division':       division_nombre,
+                'total_aislados': 0
+            }
+        alertas_por_division[key]['total_aislados'] += len(aislados)
 
     return Response({
         'cuestionario': {
-            'id': cuestionario.id,
+            'id':     cuestionario.id,
             'titulo': cuestionario.titulo,
             'activo': cuestionario.activo,
         },
         'periodo': {
-            'id': periodo.id,
+            'id':     periodo.id,
             'codigo': periodo.codigo,
             'nombre': periodo.nombre,
         },
-        'filtros_aplicados': filtros_aplicados,
+        'filtros_aplicados': _build_filtros_aplicados(division_id, tutor_id, grupo_id, periodo_id, cuestionario_id),
         'alertas_aislados': {
-            'total_global': total_aislados_global,
-            'por_division': list(alertas_por_division.values()),
-            'por_grupo': alertas_por_grupo,
+            'total_global':  total_aislados_global,
+            'por_division':  list(alertas_por_division.values()),
+            'por_grupo':     alertas_por_grupo,
         },
     }, status=status.HTTP_200_OK)
 
@@ -588,8 +479,7 @@ def alertas_comite_view(request):
 @require_comite_readonly
 def centralidad_comite_view(request):
     """
-    Top 10 de centralidad (elecciones positivas recibidas) por división y por grupo.
-
+    Top 10 de centralidad (puntos positivos recibidos) por división y por grupo.
     GET /api/comite/overview/centralidad/
 
     Query params (todos opcionales):
@@ -597,36 +487,20 @@ def centralidad_comite_view(request):
 
     Response:
     {
-        "cuestionario": { "id": 1, "titulo": "...", "activo": true },
-        "periodo": { "id": 1, "codigo": "2026-1" },
+        "cuestionario": { "id", "titulo", "activo" },
+        "periodo": { "id", "codigo", "nombre" },
         "filtros_aplicados": {},
         "top_centralidad": {
-            "por_division": [
-                {
-                    "division_id": 1,
-                    "division": "TI",
-                    "top": [
-                        { "alumno_id": 1, "nombre": "...", "matricula": "...", "elecciones_positivas": 24, "grupo": "IDGS-5-A" }
-                    ]
-                }
-            ],
-            "por_grupo": [
-                {
-                    "grupo_id": 1,
-                    "grupo_clave": "IDGS-5-A",
-                    "top": [
-                        { "alumno_id": 1, "nombre": "...", "matricula": "...", "elecciones_positivas": 18 }
-                    ]
-                }
-            ]
+            "por_division": [ { "division_id", "division", "top": [...] } ],
+            "por_grupo": [ { "grupo_id", "grupo_clave", "top": [...] } ]
         }
     }
     """
-    periodo_id = request.query_params.get('periodo_id')
+    periodo_id      = request.query_params.get('periodo_id')
     cuestionario_id = request.query_params.get('cuestionario_id')
-    division_id = request.query_params.get('division_id')
-    tutor_id = request.query_params.get('tutor_id')
-    grupo_id = request.query_params.get('grupo_id')
+    division_id     = request.query_params.get('division_id')
+    tutor_id        = request.query_params.get('tutor_id')
+    grupo_id        = request.query_params.get('grupo_id')
 
     cuestionario, periodo, error = _resolver_cuestionario(periodo_id, cuestionario_id)
     if error:
@@ -636,7 +510,6 @@ def centralidad_comite_view(request):
         periodo=periodo,
         activo=True
     ).select_related('programa', 'programa__division', 'tutor', 'tutor__user')
-
     grupos_qs = _aplicar_filtros_grupos(grupos_qs, division_id, tutor_id, grupo_id)
 
     if not grupos_qs.exists():
@@ -645,155 +518,97 @@ def centralidad_comite_view(request):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    grupos_ids = list(grupos_qs.values_list('id', flat=True))
+    grupos_list = list(grupos_qs)
 
-    # Preguntas positivas
-    preguntas_positivas_ids = list(
-        cuestionario.preguntas.filter(
-            pregunta__tipo='SELECCION_ALUMNO',
-            pregunta__polaridad='POSITIVA'
-        ).values_list('pregunta_id', flat=True)
-    )
+    # Batch: ~6 queries para todos los grupos
+    nodos_por_grupo = _calcular_nodos_batch(cuestionario, grupos_list)
 
-    alumnos_ids = list(
-        AlumnoGrupo.objects.filter(
-            grupo_id__in=grupos_ids,
-            activo=True
-        ).values_list('alumno_id', flat=True)
-    )
+    top_por_division   = {}
+    top_por_grupo_dict = {}
 
-    # Elecciones positivas por alumno — una sola query
-    elecciones_qs = Respuesta.objects.filter(
-        cuestionario=cuestionario,
-        pregunta_id__in=preguntas_positivas_ids,
-        seleccionado_alumno_id__in=alumnos_ids
-    ).values('seleccionado_alumno_id').annotate(
-        elecciones_positivas=Count('id')
-    )
-
-    elecciones_map = {
-        e['seleccionado_alumno_id']: e['elecciones_positivas']
-        for e in elecciones_qs
-    }
-
-    # Mapear alumno → grupo y división
-    alumno_grupo_map = {}
-    for grupo in grupos_qs:
-        ags = AlumnoGrupo.objects.filter(
-            grupo=grupo,
-            activo=True
-        ).select_related('alumno', 'alumno__user')
+    for grupo in grupos_list:
+        gid   = grupo.id
+        nodos = nodos_por_grupo.get(gid, {}).get('nodos', [])
 
         division_nombre = grupo.programa.division.nombre if grupo.programa and grupo.programa.division else 'Sin división'
-        division_id_val = grupo.programa.division.id if grupo.programa and grupo.programa.division else None
+        division_id_val = grupo.programa.division.id    if grupo.programa and grupo.programa.division else None
 
-        for ag in ags:
-            alumno = ag.alumno
-            alumno_grupo_map[alumno.id] = {
-                'alumno_id': alumno.id,
-                'nombre': alumno.user.nombre_completo,
-                'matricula': alumno.matricula,
-                'elecciones_positivas': elecciones_map.get(alumno.id, 0),
-                'grupo_id': grupo.id,
-                'grupo_clave': grupo.clave,
+        if division_id_val not in top_por_division:
+            top_por_division[division_id_val] = {
                 'division_id': division_id_val,
-                'division': division_nombre,
+                'division':    division_nombre,
+                'alumnos':     []
             }
+        if gid not in top_por_grupo_dict:
+            top_por_grupo_dict[gid] = {
+                'grupo_id':    gid,
+                'grupo_clave': grupo.clave,
+                'alumnos':     []
+            }
+
+        for nodo in nodos:
+            entrada = {
+                'alumno_id':           nodo['alumno_id'],
+                'nombre':              nodo['nombre'],
+                'matricula':           nodo['matricula'],
+                'elecciones_positivas': nodo['puntos_positivos'],
+                'grupo_clave':         grupo.clave,
+            }
+            top_por_division[division_id_val]['alumnos'].append(entrada)
+            top_por_grupo_dict[gid]['alumnos'].append(entrada)
 
     # Top 10 por división
-    top_por_division = {}
-    for alumno_data in alumno_grupo_map.values():
-        div_id = alumno_data['division_id']
-        if div_id not in top_por_division:
-            top_por_division[div_id] = {
-                'division_id': div_id,
-                'division': alumno_data['division'],
-                'alumnos': []
-            }
-        top_por_division[div_id]['alumnos'].append(alumno_data)
-
     top_centralidad_division = []
     for div_data in top_por_division.values():
-        top_10 = sorted(
-            div_data['alumnos'],
-            key=lambda x: x['elecciones_positivas'],
-            reverse=True
-        )[:10]
+        top_10 = sorted(div_data['alumnos'], key=lambda x: x['elecciones_positivas'], reverse=True)[:10]
         top_centralidad_division.append({
             'division_id': div_data['division_id'],
-            'division': div_data['division'],
+            'division':    div_data['division'],
             'top': [
                 {
-                    'alumno_id': a['alumno_id'],
-                    'nombre': a['nombre'],
-                    'matricula': a['matricula'],
+                    'alumno_id':           a['alumno_id'],
+                    'nombre':              a['nombre'],
+                    'matricula':           a['matricula'],
                     'elecciones_positivas': a['elecciones_positivas'],
-                    'grupo': a['grupo_clave'],
+                    'grupo':               a['grupo_clave'],
                 }
                 for a in top_10
             ]
         })
 
     # Top 10 por grupo
-    top_por_grupo_dict = {}
-    for alumno_data in alumno_grupo_map.values():
-        g_id = alumno_data['grupo_id']
-        if g_id not in top_por_grupo_dict:
-            top_por_grupo_dict[g_id] = {
-                'grupo_id': g_id,
-                'grupo_clave': alumno_data['grupo_clave'],
-                'alumnos': []
-            }
-        top_por_grupo_dict[g_id]['alumnos'].append(alumno_data)
-
     top_centralidad_grupo = []
     for grp_data in top_por_grupo_dict.values():
-        top_10 = sorted(
-            grp_data['alumnos'],
-            key=lambda x: x['elecciones_positivas'],
-            reverse=True
-        )[:10]
+        top_10 = sorted(grp_data['alumnos'], key=lambda x: x['elecciones_positivas'], reverse=True)[:10]
         top_centralidad_grupo.append({
-            'grupo_id': grp_data['grupo_id'],
+            'grupo_id':    grp_data['grupo_id'],
             'grupo_clave': grp_data['grupo_clave'],
             'top': [
                 {
-                    'alumno_id': a['alumno_id'],
-                    'nombre': a['nombre'],
-                    'matricula': a['matricula'],
+                    'alumno_id':           a['alumno_id'],
+                    'nombre':              a['nombre'],
+                    'matricula':           a['matricula'],
                     'elecciones_positivas': a['elecciones_positivas'],
                 }
                 for a in top_10
             ]
         })
 
-    filtros_aplicados = {}
-    if division_id:
-        filtros_aplicados['division_id'] = division_id
-    if tutor_id:
-        filtros_aplicados['tutor_id'] = tutor_id
-    if grupo_id:
-        filtros_aplicados['grupo_id'] = grupo_id
-    if periodo_id:
-        filtros_aplicados['periodo_id'] = periodo_id
-    if cuestionario_id:
-        filtros_aplicados['cuestionario_id'] = cuestionario_id
-
     return Response({
         'cuestionario': {
-            'id': cuestionario.id,
+            'id':     cuestionario.id,
             'titulo': cuestionario.titulo,
             'activo': cuestionario.activo,
         },
         'periodo': {
-            'id': periodo.id,
+            'id':     periodo.id,
             'codigo': periodo.codigo,
             'nombre': periodo.nombre,
         },
-        'filtros_aplicados': filtros_aplicados,
+        'filtros_aplicados': _build_filtros_aplicados(division_id, tutor_id, grupo_id, periodo_id, cuestionario_id),
         'top_centralidad': {
             'por_division': top_centralidad_division,
-            'por_grupo': top_centralidad_grupo,
+            'por_grupo':    top_centralidad_grupo,
         },
     }, status=status.HTTP_200_OK)
 
@@ -803,54 +618,39 @@ def centralidad_comite_view(request):
 @require_comite_readonly
 def graphs_comite_view(request):
     """
-    Datos para gráficas del dashboard del Comité.
-    Distribución ACEPTADO/RECHAZADO/INVISIBLE por grupo.
-
+    Distribución ACEPTADO/RECHAZADO/INVISIBLE por grupo para gráficas.
     GET /api/comite/graphs
 
     Query params (todos opcionales):
-    - periodo_id      : ver periodo histórico específico
-    - cuestionario_id : ver cuestionario específico (activo o no)
-    - division_id     : filtrar por división
-    - tutor_id        : filtrar por tutor
-    - grupo_id        : filtrar por grupo específico
+    - periodo_id, cuestionario_id, division_id, tutor_id, grupo_id
 
     Response:
     {
-        "cuestionario": { "id": 1, "titulo": "..." },
-        "periodo": { "id": 1, "codigo": "2026-1" },
+        "cuestionario": { "id", "titulo", "activo" },
+        "periodo": { "id", "codigo", "nombre" },
         "filtros_aplicados": {},
         "distribucion_por_grupo": [
             {
-                "grupo_id": 1,
-                "grupo_clave": "IDGS-5-A",
-                "division": "TI",
-                "programa": "Ing. Desarrollo de Software",
-                "ACEPTADO": 18,
-                "RECHAZADO": 4,
-                "INVISIBLE": 3,
-                "total": 25
+                "grupo_id", "grupo_clave", "division", "programa",
+                "ACEPTADO", "RECHAZADO", "INVISIBLE", "total"
             }
         ]
     }
     """
-    periodo_id = request.query_params.get('periodo_id')
+    periodo_id      = request.query_params.get('periodo_id')
     cuestionario_id = request.query_params.get('cuestionario_id')
-    division_id = request.query_params.get('division_id')
-    tutor_id = request.query_params.get('tutor_id')
-    grupo_id = request.query_params.get('grupo_id')
+    division_id     = request.query_params.get('division_id')
+    tutor_id        = request.query_params.get('tutor_id')
+    grupo_id        = request.query_params.get('grupo_id')
 
-    # Resolver cuestionario
     cuestionario, periodo, error = _resolver_cuestionario(periodo_id, cuestionario_id)
     if error:
         return error
 
-    # Obtener grupos con filtros
     grupos_qs = Grupo.objects.filter(
         periodo=periodo,
         activo=True
     ).select_related('programa', 'programa__division')
-
     grupos_qs = _aplicar_filtros_grupos(grupos_qs, division_id, tutor_id, grupo_id)
 
     if not grupos_qs.exists():
@@ -859,51 +659,41 @@ def graphs_comite_view(request):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    # Calcular distribución por grupo
-    distribucion = []
+    grupos_list = list(grupos_qs)
 
-    for grupo in grupos_qs:
-        nodos_data = _calcular_nodos_sociograma(cuestionario, grupo)
-        nodos = nodos_data['nodos']
+    # Batch: ~6 queries para todos los grupos
+    nodos_por_grupo = _calcular_nodos_batch(cuestionario, grupos_list)
+
+    distribucion = []
+    for grupo in grupos_list:
+        nodos = nodos_por_grupo.get(grupo.id, {}).get('nodos', [])
 
         aceptados = sum(1 for n in nodos if n['tipo'] == 'ACEPTADO')
         rechazados = sum(1 for n in nodos if n['tipo'] == 'RECHAZADO')
         invisibles = sum(1 for n in nodos if n['tipo'] == 'INVISIBLE')
 
         distribucion.append({
-            'grupo_id': grupo.id,
+            'grupo_id':    grupo.id,
             'grupo_clave': grupo.clave,
-            'division': grupo.programa.division.nombre if grupo.programa and grupo.programa.division else None,
-            'programa': grupo.programa.nombre if grupo.programa else None,
-            'ACEPTADO': aceptados,
-            'RECHAZADO': rechazados,
-            'INVISIBLE': invisibles,
-            'total': len(nodos),
+            'division':    grupo.programa.division.nombre if grupo.programa and grupo.programa.division else None,
+            'programa':    grupo.programa.nombre if grupo.programa else None,
+            'ACEPTADO':    aceptados,
+            'RECHAZADO':   rechazados,
+            'INVISIBLE':   invisibles,
+            'total':       len(nodos),
         })
-
-    filtros_aplicados = {}
-    if division_id:
-        filtros_aplicados['division_id'] = division_id
-    if tutor_id:
-        filtros_aplicados['tutor_id'] = tutor_id
-    if grupo_id:
-        filtros_aplicados['grupo_id'] = grupo_id
-    if periodo_id:
-        filtros_aplicados['periodo_id'] = periodo_id
-    if cuestionario_id:
-        filtros_aplicados['cuestionario_id'] = cuestionario_id
 
     return Response({
         'cuestionario': {
-            'id': cuestionario.id,
+            'id':     cuestionario.id,
             'titulo': cuestionario.titulo,
             'activo': cuestionario.activo,
         },
         'periodo': {
-            'id': periodo.id,
+            'id':     periodo.id,
             'codigo': periodo.codigo,
             'nombre': periodo.nombre,
         },
-        'filtros_aplicados': filtros_aplicados,
+        'filtros_aplicados':    _build_filtros_aplicados(division_id, tutor_id, grupo_id, periodo_id, cuestionario_id),
         'distribucion_por_grupo': distribucion,
     }, status=status.HTTP_200_OK)
