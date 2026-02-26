@@ -148,10 +148,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # REST FRAMEWORK CONFIGURATION
 # ============================================
 
+# DESPUÉS
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -170,12 +170,14 @@ REST_FRAMEWORK = {
     'DATE_FORMAT': '%Y-%m-%d',
 }
 
-# Agregar BrowsableAPIRenderer solo en desarrollo
+# Agregar BrowsableAPIRenderer Y SessionAuthentication solo en desarrollo
 if DEBUG:
     REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'].append(
         'rest_framework.renderers.BrowsableAPIRenderer'
     )
-
+    REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES'].append(
+        'rest_framework.authentication.SessionAuthentication'
+    )
 
 # ============================================
 # JWT CONFIGURATION

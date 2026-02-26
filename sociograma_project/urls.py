@@ -1,3 +1,4 @@
+# sociograma_project/urls.py
 """
 URL configuration for sociograma_project project.
 
