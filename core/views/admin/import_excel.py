@@ -6,7 +6,7 @@ import os
 import re
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from rest_framework import status
 from django.db import transaction
 from collections import defaultdict
@@ -525,28 +525,39 @@ def importar_divisiones_programas(df_alumnos, df_grupos):
 def importar_tutores(df_tutores, divisiones_cache):
     """
     Importa tutores usando bulk_create (OPTIMIZADO)
-    
+
     Returns:
         tuple: (tutores_cache, stats)
     """
-    from datetime import date
-    
     tutores_cache = {}
     stats = {'creados': 0, 'errores': []}
-    
+
     # Obtener IDs existentes de una sola vez
     empleados_existentes = set(
         Docente.objects.values_list('profesor_id', flat=True)
     )
-    
+
     usernames_existentes = set(
         User.objects.filter(rol='DOCENTE').values_list('username', flat=True)
     )
-    
+
+    # Precargar en un query los docentes del Excel que ya existen en BD
+    empleados_en_excel = {
+        limpiar_texto(row.get('No. de empleado'))
+        for _, row in df_tutores.iterrows()
+        if limpiar_texto(row.get('No. de empleado'))
+    }
+    docentes_existentes_dict = {
+        d.profesor_id: d
+        for d in Docente.objects.filter(
+            profesor_id__in=empleados_en_excel & empleados_existentes
+        ).select_related('user')
+    }
+
     # Listas para bulk create
     users_to_create = []
     docentes_to_create = []
-    
+
     # Primera pasada: preparar users para crear
     for idx, row in df_tutores.iterrows():
         try:
@@ -556,14 +567,13 @@ def importar_tutores(df_tutores, divisiones_cache):
             a_materno = limpiar_texto(row.get('A. Materno', ''))
             sexo = limpiar_texto(row.get('Sexo', ''))
             email = limpiar_texto(row.get('Email', ''))
-            
+
             if not empleado_id or not nombres:
                 continue
-            
-            # Si el docente ya existe, recuperarlo
+
+            # Si el docente ya existe, recuperarlo del dict precargado
             if empleado_id in empleados_existentes:
-                docente = Docente.objects.select_related('user').get(profesor_id=empleado_id)
-                tutores_cache[empleado_id] = docente
+                tutores_cache[empleado_id] = docentes_existentes_dict[empleado_id]
                 continue
             
             apellidos = f"{a_paterno or ''} {a_materno or ''}".strip()
@@ -649,11 +659,27 @@ def importar_tutores(df_tutores, divisiones_cache):
 
 def importar_grupos(df_grupos, programas_cache, tutores_cache, periodo):
     """
-    Importa grupos
+    Importa grupos usando bulk_create (OPTIMIZADO)
     """
     grupos_cache = {}
     stats = {'creados': 0, 'errores': []}
-    
+
+    # Preconstruir dict de búsqueda de tutores por nombre (evita O(n) lineal por grupo)
+    tutores_por_nombre = {}
+    for empleado_id, doc in tutores_cache.items():
+        if hasattr(doc, 'id') and doc.id is not None:
+            nombre = (doc.user.nombre_completo or doc.user.get_full_name()).lower()
+            tutores_por_nombre[nombre] = doc
+
+    # Precargar grupos existentes del periodo en un solo query
+    grupos_existentes = {
+        g.clave: g
+        for g in Grupo.objects.filter(periodo=periodo)
+    }
+
+    grupos_to_create = []
+    clave_to_cache_key = {}
+
     for idx, row in df_grupos.iterrows():
         try:
             cuatrimestre_str = limpiar_texto(row.get('Cuatrimestre'))
@@ -661,86 +687,99 @@ def importar_grupos(df_grupos, programas_cache, tutores_cache, periodo):
             programa_nombre = limpiar_texto(row.get('Programa'))
             tutor_nombre = limpiar_texto(row.get('Tutor Asignado', ''))
             turno = limpiar_texto(row.get('Turno', 'Matutino'))
-            
+
             if not grupo_clave or not programa_nombre:
                 continue
-            
+
             if turno and turno.lower() not in ['matutino', 'vespertino', 'nocturno']:
                 turno = 'Matutino'
             elif turno:
                 turno = turno.capitalize()
-            
+
             programa = programas_cache.get(programa_nombre)
             if not programa:
                 stats['errores'].append(f"Grupo fila {idx+2}: Programa no encontrado '{programa_nombre}'")
                 continue
-            
-            # Buscar tutor
+
+            # Buscar tutor en el dict preconstruido (O(n) una sola vez, no por grupo)
             tutor = None
             if tutor_nombre:
-                for empleado_id, doc in tutores_cache.items():
-                    # ⭐ FIX: Verificar que el docente tiene ID (fue guardado)
-                    if not hasattr(doc, 'id') or doc.id is None:
-                        continue
-                    
-                    nombre_completo = doc.user.nombre_completo or doc.user.get_full_name()
-                    if tutor_nombre.lower() in nombre_completo.lower():
+                tutor_nombre_lower = tutor_nombre.lower()
+                for nombre, doc in tutores_por_nombre.items():
+                    if tutor_nombre_lower in nombre:
                         tutor = doc
                         break
-            
+
             # Extraer grado
-            grado_match = re.match(r'^\d+', str(cuatrimestre_str)) 
+            grado_match = re.match(r'^\d+', str(cuatrimestre_str))
             grado_final = grado_match.group(0) if grado_match else 'SG'
-            
+
             clave_unica_bd = f"{programa.codigo}-{grado_final}-{grupo_clave}"
-            
-            grupo, created = Grupo.objects.get_or_create(
+            cache_key = (programa_nombre, cuatrimestre_str, grupo_clave)
+
+            if clave_unica_bd in grupos_existentes:
+                grupos_cache[cache_key] = grupos_existentes[clave_unica_bd]
+                continue
+
+            grupos_to_create.append(Grupo(
                 clave=clave_unica_bd,
                 periodo=periodo,
-                defaults={
-                    'grado': grado_final, 
-                    'grupo': grupo_clave,
-                    'turno': turno or 'Matutino',
-                    'programa': programa,
-                    'tutor': tutor,  # ← Ahora solo asigna si tiene ID
-                    'activo': 1,
-                    'cupo_maximo': 40
-                }
-            )
-            
-            cache_key = (programa_nombre, cuatrimestre_str, grupo_clave)
-            grupos_cache[cache_key] = grupo
-            
-            if created:
-                stats['creados'] += 1
-                
+                grado=grado_final,
+                grupo=grupo_clave,
+                turno=turno or 'Matutino',
+                programa=programa,
+                tutor=tutor,
+                activo=1,
+                cupo_maximo=40
+            ))
+            clave_to_cache_key[clave_unica_bd] = cache_key
+            stats['creados'] += 1
+
         except Exception as e:
             stats['errores'].append(f"Grupo fila {idx+2}: {str(e)}")
-    
+
+    # Bulk create grupos nuevos y recuperarlos con sus IDs
+    if grupos_to_create:
+        Grupo.objects.bulk_create(grupos_to_create, batch_size=100, ignore_conflicts=True)
+        claves_nuevas = list(clave_to_cache_key.keys())
+        for grupo in Grupo.objects.filter(clave__in=claves_nuevas, periodo=periodo):
+            grupos_cache[clave_to_cache_key[grupo.clave]] = grupo
+
     return grupos_cache, stats
 
 
 def importar_alumnos(df_alumnos, programas_cache):
     """
     Importa alumnos usando bulk_create (OPTIMIZADO)
-    
+
     Returns:
         tuple: (alumnos_cache, stats)
     """
-    from datetime import date
-    
     alumnos_cache = {}
     stats = {'creados': 0, 'errores': []}
-    
+
     # Obtener matrículas existentes de una sola vez
     matriculas_existentes = set(
         Alumno.objects.values_list('matricula', flat=True)
     )
-    
+
     usernames_existentes = set(
         User.objects.filter(rol='ALUMNO').values_list('username', flat=True)
     )
-    
+
+    # Precargar en un query los alumnos del Excel que ya existen en BD
+    matriculas_en_excel = {
+        limpiar_texto(row.get('Matrícula'))
+        for _, row in df_alumnos.iterrows()
+        if limpiar_texto(row.get('Matrícula'))
+    }
+    alumnos_existentes_dict = {
+        a.matricula: a
+        for a in Alumno.objects.filter(
+            matricula__in=matriculas_en_excel & matriculas_existentes
+        ).select_related('user')
+    }
+
     # Listas para bulk create
     users_to_create = []
     alumnos_to_create = []
@@ -774,10 +813,9 @@ def importar_alumnos(df_alumnos, programas_cache):
             if not matricula or not nombres:
                 continue
             
-            # Si el alumno ya existe, recuperarlo
+            # Si el alumno ya existe, recuperarlo del dict precargado
             if matricula in matriculas_existentes:
-                alumno = Alumno.objects.select_related('user').get(matricula=matricula)
-                alumnos_cache[matricula] = alumno
+                alumnos_cache[matricula] = alumnos_existentes_dict[matricula]
                 continue
             
             apellidos = f"{a_paterno or ''} {a_materno or ''}".strip()
@@ -869,14 +907,13 @@ def importar_alumnos(df_alumnos, programas_cache):
 def importar_relaciones_inscritos(df_inscritos, alumnos_cache, grupos_cache):
     """
     Importa relaciones alumno-grupo usando bulk_create (OPTIMIZADO)
-    
+
     Returns:
         dict: stats
     """
-    from datetime import date
-    
     stats = {'creados': 0, 'errores': []}
-    
+    today = date.today()
+
     # Obtener IDs de alumnos y grupos del cache
     alumnos_ids = [a.id for a in alumnos_cache.values() if hasattr(a, 'id')]
     grupos_ids = [g.id for g in grupos_cache.values() if hasattr(g, 'id')]
@@ -917,7 +954,7 @@ def importar_relaciones_inscritos(df_inscritos, alumnos_cache, grupos_cache):
             relacion = AlumnoGrupo(
                 alumno=alumno,
                 grupo=grupo,
-                fecha_inscripcion=date.today(),
+                fecha_inscripcion=today,
                 activo=1
             )
             relaciones_to_create.append(relacion)
