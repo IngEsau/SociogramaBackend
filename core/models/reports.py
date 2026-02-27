@@ -40,7 +40,7 @@ class Reporte(models.Model):
     
     class Meta:
         db_table = 'reportes'
-        managed = False
+        managed = True
         verbose_name = 'Reporte'
         verbose_name_plural = 'Reportes'
         ordering = ['-creado_en']

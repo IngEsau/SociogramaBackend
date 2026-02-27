@@ -16,9 +16,9 @@ class Grupo(models.Model):
         ('Nocturno', 'Nocturno'),
     ]
     
-    clave = models.CharField(max_length=50)
-    grado = models.CharField(max_length=100, null=True, blank=True)
-    grupo = models.CharField(max_length=100, null=True, blank=True)
+    clave = models.CharField(max_length=20)
+    grado = models.CharField(max_length=10, null=True, blank=True)
+    grupo = models.CharField(max_length=10, null=True, blank=True)
     turno = models.CharField(max_length=20, choices=TURNO_CHOICES, default='Matutino')
     programa = models.ForeignKey(
         Programa,
@@ -46,7 +46,7 @@ class Grupo(models.Model):
     
     class Meta:
         db_table = 'grupos'
-        managed = False
+        managed = True
         unique_together = ['clave', 'periodo']
         verbose_name = 'Grupo'
         verbose_name_plural = 'Grupos'
@@ -87,7 +87,7 @@ class AlumnoGrupo(models.Model):
     
     class Meta:
         db_table = 'alumno_grupo'
-        managed = False
+        managed = True
         unique_together = ['alumno', 'grupo']
         verbose_name = 'Alumno-Grupo'
         verbose_name_plural = 'Alumnos-Grupos'

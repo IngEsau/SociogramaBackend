@@ -133,7 +133,7 @@ def progreso_cuestionario_view(request, cuestionario_id):
             grupo_id__in=grupos_ids
         ).select_related(
             'alumno', 'alumno__user'
-        ).order_by('alumno__user__nombre_completo')
+        ).order_by('alumno__user__last_name', 'alumno__user__first_name')
 
         for estado in estados_detalle:
             gid = estado.grupo_id
@@ -147,10 +147,12 @@ def progreso_cuestionario_view(request, cuestionario_id):
                 segundos = int(delta.total_seconds() % 60)
                 tiempo_transcurrido = f"{minutos}m {segundos}s"
 
+            numero_lista = len(alumnos_por_grupo[gid]) + 1
             alumnos_por_grupo[gid].append({
+                'numero_lista': numero_lista,
                 'alumno_id': estado.alumno.id,
                 'matricula': estado.alumno.matricula,
-                'nombre': estado.alumno.user.nombre_completo,
+                'nombre': f"{estado.alumno.user.last_name} {estado.alumno.user.first_name}".strip(),
                 'estado': estado.estado,
                 'fecha_inicio': estado.fecha_inicio,
                 'fecha_completado': estado.fecha_completado,
@@ -306,7 +308,7 @@ def registro_cuestionario_view(request, cuestionario_id):
         grupo=grupo
     ).select_related(
         'alumno', 'alumno__user'
-    ).order_by('alumno__user__nombre_completo')
+    ).order_by('alumno__user__last_name', 'alumno__user__first_name')
 
     # Construir lista de alumnos y resumen en una sola pasada
     alumnos_data = []
@@ -333,9 +335,10 @@ def registro_cuestionario_view(request, cuestionario_id):
             tiempo_transcurrido = f"{minutos}m {segundos}s"
 
         alumnos_data.append({
+            'numero_lista': total,
             'alumno_id': estado.alumno.id,
             'matricula': estado.alumno.matricula,
-            'nombre': estado.alumno.user.nombre_completo,
+            'nombre': f"{estado.alumno.user.last_name} {estado.alumno.user.first_name}".strip(),
             'estado': estado.estado,
             'fecha_inicio': estado.fecha_inicio,
             'fecha_completado': estado.fecha_completado,
@@ -379,7 +382,9 @@ def _calcular_nodos_sociograma(cuestionario, grupo):
     alumnos_grupo = AlumnoGrupo.objects.filter(
         grupo=grupo,
         activo=True
-    ).select_related('alumno', 'alumno__user')
+    ).select_related('alumno', 'alumno__user').order_by(
+        'alumno__user__last_name', 'alumno__user__first_name'
+    )
     
     total_alumnos = alumnos_grupo.count()
     alumnos_ids = list(alumnos_grupo.values_list('alumno_id', flat=True))
@@ -456,7 +461,7 @@ def _calcular_nodos_sociograma(cuestionario, grupo):
     nodos = []
     respuestas_completas = 0
 
-    for ag in alumnos_grupo:
+    for numero_lista, ag in enumerate(alumnos_grupo, start=1):
         alumno = ag.alumno
         p = puntos_map.get(alumno.id, {})
 
@@ -478,9 +483,10 @@ def _calcular_nodos_sociograma(cuestionario, grupo):
         )
 
         nodos.append({
+            'numero_lista': numero_lista,
             'alumno_id': alumno.id,
             'matricula': alumno.matricula,
-            'nombre': alumno.user.nombre_completo,
+            'nombre': f"{alumno.user.last_name} {alumno.user.first_name}".strip(),
             'tipo': tipo,
             'puntos_positivos': puntos_positivos,
             'puntos_negativos': puntos_negativos,
@@ -550,9 +556,9 @@ def _calcular_conexiones_sociograma(cuestionario, grupo):
         if key not in conexiones_dict:
             conexiones_dict[key] = {
                 'origen_id': resp.alumno.id,
-                'origen_nombre': resp.alumno.user.nombre_completo,
+                'origen_nombre': f"{resp.alumno.user.last_name} {resp.alumno.user.first_name}".strip(),
                 'destino_id': resp.seleccionado_alumno.id,
-                'destino_nombre': resp.seleccionado_alumno.user.nombre_completo,
+                'destino_nombre': f"{resp.seleccionado_alumno.user.last_name} {resp.seleccionado_alumno.user.first_name}".strip(),
                 'peso_total': 0,
                 'polaridad': resp.pregunta.polaridad
             }

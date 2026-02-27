@@ -8,14 +8,14 @@ from django.db import models
 
 class Division(models.Model):
     """División académica (TI, ADM, ING, SALUD)"""
-    codigo = models.CharField(max_length=100, unique=True)
+    codigo = models.CharField(max_length=10, unique=True)
     nombre = models.CharField(max_length=100)
     descripcion = models.TextField(null=True, blank=True)
     activa = models.BooleanField(default=True)
     
     class Meta:
         db_table = 'divisiones'
-        managed = False
+        managed = True
         verbose_name = 'División'
         verbose_name_plural = 'Divisiones'
         ordering = ['nombre']
@@ -26,7 +26,7 @@ class Division(models.Model):
 
 class Programa(models.Model):
     """Programa académico (Carrera)"""
-    codigo = models.CharField(max_length=1000, unique=True)
+    codigo = models.CharField(max_length=20, unique=True)
     nombre = models.CharField(max_length=150)
     division = models.ForeignKey(
         Division, 
@@ -39,7 +39,7 @@ class Programa(models.Model):
     
     class Meta:
         db_table = 'programas'
-        managed = False
+        managed = True
         verbose_name = 'Programa'
         verbose_name_plural = 'Programas'
         ordering = ['nombre']
@@ -63,7 +63,7 @@ class PlanEstudio(models.Model):
     
     class Meta:
         db_table = 'planes_estudio'
-        managed = False
+        managed = True
         unique_together = ['codigo', 'programa']
         verbose_name = 'Plan de Estudio'
         verbose_name_plural = 'Planes de Estudio'
@@ -83,7 +83,7 @@ class Periodo(models.Model):
     
     class Meta:
         db_table = 'periodos'
-        managed = False
+        managed = True
         verbose_name = 'Periodo'
         verbose_name_plural = 'Periodos'
         ordering = ['-fecha_inicio']
