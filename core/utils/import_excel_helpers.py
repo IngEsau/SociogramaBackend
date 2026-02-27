@@ -5,6 +5,7 @@ Funciones auxiliares para importación de datos desde Excel
 import re
 import pandas as pd
 from datetime import date
+from django.db.models import Count, Q
 from core.models import (
     Division, Programa, PlanEstudio, Periodo, 
     Docente, Grupo, Alumno, AlumnoGrupo, User
@@ -146,20 +147,17 @@ def generar_preview_datos(df_alumnos, df_grupos, df_tutores, df_inscritos):
 def obtener_periodos_disponibles():
     """
     Obtiene lista de periodos disponibles con información adicional
-    
+
     Returns:
         list: Lista de periodos con sus datos
     """
-    periodos = Periodo.objects.all().order_by('-codigo')
-    
+    periodos = Periodo.objects.annotate(
+        grupos_count=Count('grupos', filter=Q(grupos__activo=True), distinct=True),
+        alumnos_count=Count('grupos__alumnos', filter=Q(grupos__alumnos__activo=True), distinct=True),
+    ).order_by('-codigo')
+
     periodos_data = []
     for periodo in periodos:
-        grupos_count = Grupo.objects.filter(periodo=periodo, activo=1).count()
-        alumnos_count = AlumnoGrupo.objects.filter(
-            grupo__periodo=periodo, 
-            activo=1
-        ).count()
-        
         periodos_data.append({
             'id': periodo.id,
             'codigo': periodo.codigo,
@@ -167,10 +165,10 @@ def obtener_periodos_disponibles():
             'activo': periodo.activo == 1,
             'fecha_inicio': periodo.fecha_inicio.isoformat() if periodo.fecha_inicio else None,
             'fecha_fin': periodo.fecha_fin.isoformat() if periodo.fecha_fin else None,
-            'grupos_actuales': grupos_count,
-            'alumnos_actuales': alumnos_count,
+            'grupos_actuales': periodo.grupos_count,
+            'alumnos_actuales': periodo.alumnos_count,
         })
-    
+
     return periodos_data
 
 
