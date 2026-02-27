@@ -76,3 +76,9 @@ static_root/
 #Excel
 *.xlsx
 *.xls
+
+# Database backups (datos sensibles)
+database/backups/
+
+# Claude
+*.claude

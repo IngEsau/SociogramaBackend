@@ -49,7 +49,7 @@ class Pregunta(models.Model):
     
     class Meta:
         db_table = 'preguntas'
-        managed = False
+        managed = True
         verbose_name = 'Pregunta'
         verbose_name_plural = 'Preguntas'
         ordering = ['orden']
@@ -77,7 +77,7 @@ class Opcion(models.Model):
     
     class Meta:
         db_table = 'opciones'
-        managed = False
+        managed = True
         verbose_name = 'Opción'
         verbose_name_plural = 'Opciones'
         ordering = ['pregunta', 'orden']
@@ -277,7 +277,7 @@ class Respuesta(models.Model):
     
     class Meta:
         db_table = 'respuestas'
-        managed = False
+        managed = True
         unique_together = [['alumno', 'pregunta', 'seleccionado_alumno']]
         verbose_name = 'Respuesta'
         verbose_name_plural = 'Respuestas'

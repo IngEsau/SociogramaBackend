@@ -39,7 +39,7 @@ class Docente(models.Model):
     
     class Meta:
         db_table = 'docentes'
-        managed = False
+        managed = True
         verbose_name = 'Docente'
         verbose_name_plural = 'Docentes'
         ordering = ['profesor_id']
@@ -85,7 +85,7 @@ class Alumno(models.Model):
     
     class Meta:
         db_table = 'alumnos'
-        managed = False
+        managed = True
         verbose_name = 'Alumno'
         verbose_name_plural = 'Alumnos'
         ordering = ['matricula']
