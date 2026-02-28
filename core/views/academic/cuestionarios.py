@@ -364,6 +364,147 @@ def registro_cuestionario_view(request, cuestionario_id):
 
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+@require_tutor
+def clasificacion_por_pregunta_view(request, cuestionario_id):
+    """
+    Ranking de alumnos por puntos recibidos en una pregunta específica.
+    Solo aplica a preguntas de tipo SELECCION_ALUMNO.
+
+    GET /api/academic/cuestionarios/{id}/clasificacion-pregunta/
+    Query params:
+    - grupo_id: requerido
+    - pregunta_id: requerido (debe pertenecer al cuestionario)
+
+    Response:
+    {
+        "cuestionario_id": 1,
+        "cuestionario_titulo": "...",
+        "grupo_id": 1,
+        "grupo_clave": "IDGS-5-A",
+        "pregunta_id": 3,
+        "pregunta_texto": "¿Con quién harías equipo?",
+        "pregunta_polaridad": "POSITIVA",
+        "ranking": [
+            {
+                "rank": 1,
+                "numero_lista": 4,
+                "alumno_id": 12,
+                "matricula": "UP210042",
+                "nombre": "García López Juan Carlos",
+                "puntaje_recibido": 9
+            }
+        ]
+    }
+    """
+    cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
+
+    grupo_id   = request.query_params.get('grupo_id')
+    pregunta_id = request.query_params.get('pregunta_id')
+
+    if not grupo_id:
+        return Response(
+            {'error': 'El parámetro grupo_id es requerido'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    if not pregunta_id:
+        return Response(
+            {'error': 'El parámetro pregunta_id es requerido'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Verificar acceso del tutor al grupo
+    grupo = Grupo.objects.filter(
+        id=grupo_id,
+        tutor=request.docente,
+        periodo=cuestionario.periodo,
+        activo=True
+    ).first()
+
+    if not grupo:
+        return Response(
+            {'error': 'No tienes acceso a este grupo'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Verificar que la pregunta pertenece al cuestionario y es de selección
+    cp = cuestionario.preguntas.select_related('pregunta').filter(
+        pregunta_id=pregunta_id
+    ).first()
+
+    if not cp:
+        return Response(
+            {'error': 'La pregunta no pertenece a este cuestionario'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    pregunta = cp.pregunta
+
+    if pregunta.tipo != 'SELECCION_ALUMNO':
+        return Response(
+            {'error': 'Solo se puede clasificar por preguntas de tipo SELECCION_ALUMNO'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Alumnos del grupo ordenados alfabéticamente (para numero_lista consistente)
+    alumnos_grupo = AlumnoGrupo.objects.filter(
+        grupo=grupo,
+        activo=True
+    ).select_related('alumno', 'alumno__user').order_by(
+        'alumno__user__last_name', 'alumno__user__first_name'
+    )
+
+    alumnos_ids = [ag.alumno_id for ag in alumnos_grupo]
+
+    # Puntos recibidos por alumno en esta pregunta — una sola query
+    puntajes_qs = Respuesta.objects.filter(
+        cuestionario=cuestionario,
+        pregunta=pregunta,
+        seleccionado_alumno_id__in=alumnos_ids
+    ).values('seleccionado_alumno_id').annotate(
+        puntaje_total=Sum('puntaje')
+    )
+
+    puntajes_map = {r['seleccionado_alumno_id']: r['puntaje_total'] or 0 for r in puntajes_qs}
+
+    # Asignar numero_lista y puntaje a cada alumno
+    alumnos_con_puntaje = []
+    for numero_lista, ag in enumerate(alumnos_grupo, start=1):
+        alumnos_con_puntaje.append({
+            'numero_lista': numero_lista,
+            'alumno_id': ag.alumno.id,
+            'matricula': ag.alumno.matricula,
+            'nombre': f"{ag.alumno.user.last_name} {ag.alumno.user.first_name}".strip(),
+            'puntaje_recibido': puntajes_map.get(ag.alumno_id, 0),
+        })
+
+    # Ordenar por puntaje descendente y asignar rank
+    alumnos_con_puntaje.sort(key=lambda x: x['puntaje_recibido'], reverse=True)
+
+    ranking = []
+    for rank, alumno in enumerate(alumnos_con_puntaje, start=1):
+        ranking.append({
+            'rank': rank,
+            'numero_lista': alumno['numero_lista'],
+            'alumno_id': alumno['alumno_id'],
+            'matricula': alumno['matricula'],
+            'nombre': alumno['nombre'],
+            'puntaje_recibido': alumno['puntaje_recibido'],
+        })
+
+    return Response({
+        'cuestionario_id': cuestionario.id,
+        'cuestionario_titulo': cuestionario.titulo,
+        'grupo_id': grupo.id,
+        'grupo_clave': grupo.clave,
+        'pregunta_id': pregunta.id,
+        'pregunta_texto': pregunta.texto,
+        'pregunta_polaridad': pregunta.polaridad,
+        'ranking': ranking,
+    }, status=status.HTTP_200_OK)
+
+
 # ============================================
 # FUNCIONES HELPER — SIN N+1
 # ============================================

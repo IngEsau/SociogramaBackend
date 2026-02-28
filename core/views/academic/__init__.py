@@ -13,16 +13,18 @@ from .cuestionarios import (
     progreso_cuestionario_view,
     estadisticas_cuestionario_view,
     registro_cuestionario_view,
+    clasificacion_por_pregunta_view,
 )
 
 __all__ = [
     # Grupos
     'my_groups_view',
-    
+
     # Cuestionarios
     'listar_cuestionarios_tutor_view',
     'detalle_cuestionario_tutor_view',
     'progreso_cuestionario_view',
     'estadisticas_cuestionario_view',
     'registro_cuestionario_view',
+    'clasificacion_por_pregunta_view',
 ]
