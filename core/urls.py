@@ -70,6 +70,7 @@ from .views.academic.cuestionarios import (
     progreso_cuestionario_view,
     estadisticas_cuestionario_view,
     registro_cuestionario_view,
+    clasificacion_por_pregunta_view,
 )
 
 from .views.student.cuestionarios import (
@@ -186,6 +187,7 @@ urlpatterns = [
     path('academic/cuestionarios/<int:cuestionario_id>/progreso/', progreso_cuestionario_view, name='progreso_cuestionario'),
     path('academic/cuestionarios/<int:cuestionario_id>/estadisticas/', estadisticas_cuestionario_view, name='estadisticas_cuestionario'),
     path('academic/cuestionarios/<int:cuestionario_id>/registro/', registro_cuestionario_view, name='registro_cuestionario'),
+    path('academic/cuestionarios/<int:cuestionario_id>/clasificacion-pregunta/', clasificacion_por_pregunta_view, name='clasificacion_por_pregunta'),
 
     # ========================================
     # ESTUDIANTES - CUESTIONARIOS

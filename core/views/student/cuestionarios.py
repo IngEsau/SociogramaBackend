@@ -133,18 +133,24 @@ def preguntas_cuestionario_view(request, cuestionario_id):
             'ya_respondida': ya_respondio
         })
 
-    companeros = AlumnoGrupo.objects.filter(
+    # Se obtiene la lista completa ordenada para que numero_lista
+    # refleje la posición real en la lista del grupo (sin excluir al alumno)
+    todos_grupo = AlumnoGrupo.objects.filter(
         grupo=alumno_grupo.grupo,
         activo=True
-    ).exclude(alumno=alumno).select_related('alumno', 'alumno__user').order_by('alumno__user__nombre_completo')
+    ).select_related('alumno', 'alumno__user').order_by(
+        'alumno__user__last_name', 'alumno__user__first_name'
+    )
 
     companeros_data = [
         {
+            'numero_lista': i,
             'id': ag.alumno.id,
             'matricula': ag.alumno.matricula,
-            'nombre': ag.alumno.user.nombre_completo
+            'nombre': f"{ag.alumno.user.last_name} {ag.alumno.user.first_name}".strip()
         }
-        for ag in companeros
+        for i, ag in enumerate(todos_grupo, start=1)
+        if ag.alumno_id != alumno.id
     ]
 
     return Response({
