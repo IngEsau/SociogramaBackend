@@ -26,29 +26,46 @@ class LoginSerializer(serializers.Serializer):
     def validate(self, data):
         username = data.get('username')
         password = data.get('password')
-        
-        if username and password:
-            # Intentar autenticar con username
-            user = authenticate(username=username, password=password)
-            
-            # Si no funciona, intentar buscar por matrícula
-            if not user:
-                try:
-                    alumno = Alumno.objects.select_related('user').get(matricula=username)
-                    user = authenticate(username=alumno.user.username, password=password)
-                except Alumno.DoesNotExist:
-                    pass
-            
-            if not user:
-                raise serializers.ValidationError('Credenciales inválidas')
-            
-            if not user.is_active:
-                raise serializers.ValidationError('Usuario inactivo')
-            
-            data['user'] = user
-        else:
+
+        if not username or not password:
             raise serializers.ValidationError('Debe proporcionar username y password')
-        
+
+        user = authenticate(username=username, password=password)
+
+        # Intentar por matrícula si no autenticó por username
+        inactive_candidate = None
+        if not user:
+            try:
+                alumno = Alumno.objects.select_related('user').get(matricula=username)
+                user = authenticate(username=alumno.user.username, password=password)
+                # authenticate() retorna None para inactivos — detectarlo aquí
+                if not user and alumno.user.check_password(password):
+                    inactive_candidate = alumno.user
+            except Alumno.DoesNotExist:
+                pass
+
+        if not user:
+            # Buscar por username directo para detectar cuenta inactiva
+            if not inactive_candidate:
+                try:
+                    candidate = User.objects.get(username=username)
+                    if candidate.check_password(password) and not candidate.is_active:
+                        inactive_candidate = candidate
+                except User.DoesNotExist:
+                    pass
+
+            if inactive_candidate:
+                if inactive_candidate.rol == 'ALUMNO':
+                    raise serializers.ValidationError(
+                        'No estás inscrito en el periodo actual. Contacta a servicios escolares.'
+                    )
+                raise serializers.ValidationError(
+                    'Tu cuenta está inactiva. Contacta al administrador.'
+                )
+
+            raise serializers.ValidationError('Credenciales inválidas')
+
+        data['user'] = user
         return data
 
 

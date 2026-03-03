@@ -45,13 +45,47 @@ from .cuestionarios import (
 )
 
 from .preguntas import (
-    listar_preguntas_view, 
-    crear_pregunta_view, 
-    detalle_pregunta_view, 
-    actualizar_pregunta_view, 
+    listar_preguntas_view,
+    crear_pregunta_view,
+    detalle_pregunta_view,
+    actualizar_pregunta_view,
     eliminar_pregunta_view,
     editar_copia_view,
 )
+
+# ========================================
+# GESTIÓN DE USUARIOS
+# ========================================
+from .usuarios import (
+    listar_usuarios_view,
+    crear_usuario_view,
+    editar_usuario_view,
+    activar_usuario_view,
+    desactivar_usuario_view,
+)
+
+# ========================================
+# GESTIÓN DE GRUPOS
+# ========================================
+from .grupos import (
+    crear_grupo_view,
+    editar_tutor_grupo_view,
+)
+
+# ========================================
+# CATÁLOGOS (División y Programa)
+# ========================================
+from .catalogos import (
+    listar_divisiones_view,
+    crear_division_view,
+    editar_division_view,
+    listar_programas_view,
+    crear_programa_view,
+    editar_programa_view,
+)
+
+# editar_periodo_view vive en periodos.py
+from .periodos import editar_periodo_view
 
 
 __all__ = [
@@ -92,4 +126,28 @@ __all__ = [
     'actualizar_pregunta_view',
     'eliminar_pregunta_view',
     'editar_copia_view',
+
+    # Usuarios
+    'listar_usuarios_view',
+    'crear_usuario_view',
+    'editar_usuario_view',
+    'activar_usuario_view',
+    'desactivar_usuario_view',
+
+    # Grupos
+    'crear_grupo_view',
+    'editar_tutor_grupo_view',
+
+    # Catálogos - Divisiones
+    'listar_divisiones_view',
+    'crear_division_view',
+    'editar_division_view',
+
+    # Catálogos - Programas
+    'listar_programas_view',
+    'crear_programa_view',
+    'editar_programa_view',
+
+    # Periodos (editar)
+    'editar_periodo_view',
 ]
