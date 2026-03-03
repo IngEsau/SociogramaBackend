@@ -18,9 +18,10 @@ from django.core.cache import cache
 import pandas as pd
 
 from core.utils.decorators import require_admin
+from core.utils.sync import sincronizar_is_active_alumnos
 from core.models import (
-    User, Division, Programa, PlanEstudio, Periodo, 
-    Docente, Grupo, Alumno, AlumnoGrupo
+    User, Division, Programa, PlanEstudio, Periodo,
+    Docente, Grupo, Alumno, AlumnoGrupo, Auditoria
 )
 from core.utils.import_excel_helpers import (
     validar_estructura_excel,
@@ -267,6 +268,8 @@ def ejecutar_importacion_view(request):
             'grupos_creados': 0,
             'alumnos_creados': 0,
             'relaciones_creadas': 0,
+            'alumnos_activados': 0,
+            'alumnos_desactivados': 0,
         }
         
         errores = []
@@ -349,7 +352,14 @@ def ejecutar_importacion_view(request):
                 errores.extend(relaciones_stats['errores'])
             log_messages.append(f"✓ Inscripciones creadas: {relaciones_stats['creados']}")
         
-        # 7. CALCULAR ESTADÍSTICAS DE CAMBIOS
+        # 7. SINCRONIZAR is_active DE ALUMNOS SEGÚN INSCRIPCIÓN
+        log_messages.append("Sincronizando acceso de alumnos...")
+        activados, desactivados = sincronizar_is_active_alumnos()
+        resultados['alumnos_activados'] = activados
+        resultados['alumnos_desactivados'] = desactivados
+        log_messages.append(f"✓ Acceso: {activados} activados, {desactivados} desactivados")
+
+        # 8. CALCULAR ESTADÍSTICAS DE CAMBIOS
         log_messages.append("Calculando estadísticas...")
         cambios_alumnado = calcular_estadisticas_cambios(periodo)
         
@@ -364,7 +374,21 @@ def ejecutar_importacion_view(request):
         cache.delete(f"importacion_{archivo_id}")
         
         log_messages.append("✓ Importación completada exitosamente")
-        
+
+        Auditoria.objects.create(
+            usuario=request.user,
+            accion='IMPORTACION',
+            entidad='importacion',
+            entidad_id=periodo.id,
+            detalle={
+                'periodo': periodo.codigo,
+                'resultados': resultados,
+                'total_errores': len(errores),
+            },
+            ip_address=request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+                       or request.META.get('REMOTE_ADDR'),
+        )
+
         return Response({
             'success': True,
             'periodo': {

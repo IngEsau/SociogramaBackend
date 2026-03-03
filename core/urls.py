@@ -21,6 +21,20 @@ from .views import (
     desactivar_periodo_view,
     crear_periodo_view,
     obtener_periodo_activo_view,
+    editar_periodo_view,
+    listar_usuarios_view,
+    crear_usuario_view,
+    editar_usuario_view,
+    activar_usuario_view,
+    desactivar_usuario_view,
+    crear_grupo_view,
+    editar_tutor_grupo_view,
+    listar_divisiones_view,
+    crear_division_view,
+    editar_division_view,
+    listar_programas_view,
+    crear_programa_view,
+    editar_programa_view,
 )
 
 # Importar views de cuestionarios admin
@@ -133,7 +147,33 @@ urlpatterns = [
     path('admin/periodos/crear/', crear_periodo_view, name='crear_periodo'),
     path('admin/periodos/<int:periodo_id>/activar/', activar_periodo_view, name='activar_periodo'),
     path('admin/periodos/<int:periodo_id>/desactivar/', desactivar_periodo_view, name='desactivar_periodo'),
+    path('admin/periodos/<int:periodo_id>/editar/', editar_periodo_view, name='editar_periodo'),
     path('periodos/activo/', obtener_periodo_activo_view, name='periodo_activo'),
+
+    # ========================================
+    # ADMINISTRACIÓN - GESTIÓN DE USUARIOS
+    # ========================================
+    path('admin/usuarios/', listar_usuarios_view, name='listar_usuarios'),
+    path('admin/usuarios/crear/', crear_usuario_view, name='crear_usuario'),
+    path('admin/usuarios/<int:usuario_id>/editar/', editar_usuario_view, name='editar_usuario'),
+    path('admin/usuarios/<int:usuario_id>/activar/', activar_usuario_view, name='activar_usuario'),
+    path('admin/usuarios/<int:usuario_id>/desactivar/', desactivar_usuario_view, name='desactivar_usuario'),
+
+    # ========================================
+    # ADMINISTRACIÓN - GESTIÓN DE GRUPOS
+    # ========================================
+    path('admin/grupos/crear/', crear_grupo_view, name='crear_grupo'),
+    path('admin/grupos/<int:grupo_id>/editar-tutor/', editar_tutor_grupo_view, name='editar_tutor_grupo'),
+
+    # ========================================
+    # ADMINISTRACIÓN - CATÁLOGOS
+    # ========================================
+    path('admin/catalogos/divisiones/', listar_divisiones_view, name='listar_divisiones'),
+    path('admin/catalogos/divisiones/crear/', crear_division_view, name='crear_division'),
+    path('admin/catalogos/divisiones/<int:division_id>/editar/', editar_division_view, name='editar_division'),
+    path('admin/catalogos/programas/', listar_programas_view, name='listar_programas'),
+    path('admin/catalogos/programas/crear/', crear_programa_view, name='crear_programa'),
+    path('admin/catalogos/programas/<int:programa_id>/editar/', editar_programa_view, name='editar_programa'),
 
     # ========================================
     # ADMINISTRACIÓN - GESTIÓN DE CUESTIONARIOS

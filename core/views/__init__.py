@@ -33,6 +33,20 @@ from .admin import (
     desactivar_periodo_view,
     crear_periodo_view,
     obtener_periodo_activo_view,
+    editar_periodo_view,
+    listar_usuarios_view,
+    crear_usuario_view,
+    editar_usuario_view,
+    activar_usuario_view,
+    desactivar_usuario_view,
+    crear_grupo_view,
+    editar_tutor_grupo_view,
+    listar_divisiones_view,
+    crear_division_view,
+    editar_division_view,
+    listar_programas_view,
+    crear_programa_view,
+    editar_programa_view,
 )
 
 # Views académicas
@@ -72,7 +86,29 @@ __all__ = [
     'desactivar_periodo_view',
     'crear_periodo_view',
     'obtener_periodo_activo_view',
-    
+    'editar_periodo_view',
+
+    # Administración de Usuarios
+    'listar_usuarios_view',
+    'crear_usuario_view',
+    'editar_usuario_view',
+    'activar_usuario_view',
+    'desactivar_usuario_view',
+
+    # Administración de Grupos
+    'crear_grupo_view',
+    'editar_tutor_grupo_view',
+
+    # Catálogos - Divisiones
+    'listar_divisiones_view',
+    'crear_division_view',
+    'editar_division_view',
+
+    # Catálogos - Programas
+    'listar_programas_view',
+    'crear_programa_view',
+    'editar_programa_view',
+
     # Académico
     'my_groups_view',
 ]

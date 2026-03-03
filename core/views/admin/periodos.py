@@ -1,7 +1,6 @@
 # core/views/admin/periodos.py
 """
 Endpoints para gestión de periodos
-OPTIMIZADO: SQL directo para operaciones masivas, annotations para N+1
 """
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -9,8 +8,16 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction, connection
 
-from core.models import Periodo, Grupo, AlumnoGrupo
+from core.models import Periodo, Grupo, AlumnoGrupo, Auditoria
 from core.utils.decorators import require_admin
+from core.utils.sync import sincronizar_is_active_alumnos
+
+
+def _get_ip(request):
+    forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR')
 
 
 @api_view(['GET'])
@@ -182,6 +189,10 @@ def activar_periodo_view(request, periodo_id):
 
     periodo.refresh_from_db()
 
+    activados, desactivados = sincronizar_is_active_alumnos()
+    cambios['alumnos_activados'] = activados
+    cambios['alumnos_desactivados'] = desactivados
+
     return Response({
         'success': True,
         'periodo': {
@@ -259,6 +270,10 @@ def desactivar_periodo_view(request, periodo_id):
             cambios['inscripciones_desactivadas'] = cursor.rowcount
 
     periodo.refresh_from_db()
+
+    activados, desactivados = sincronizar_is_active_alumnos()
+    cambios['alumnos_activados'] = activados
+    cambios['alumnos_desactivados'] = desactivados
 
     return Response({
         'success': True,
@@ -453,3 +468,76 @@ def obtener_periodo_activo_view(request):
             },
             'warning': 'Hay múltiples periodos activos, se retornó el más reciente'
         }, status=status.HTTP_200_OK)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+@require_admin
+def editar_periodo_view(request, periodo_id):
+    """
+    Edita los datos de un periodo (nombre, fechas).
+    No permite cambiar el código ni el estado activo (usar activar/desactivar para eso).
+
+    PATCH /api/admin/periodos/<periodo_id>/editar/
+    Body (todos opcionales):
+    {
+        "nombre": "Nuevo nombre",
+        "fecha_inicio": "2026-01-15",
+        "fecha_fin": "2026-04-30"
+    }
+
+    Response:
+    {
+        "success": true,
+        "periodo": {
+            "id": 1,
+            "codigo": "2026-1",
+            "nombre": "Nuevo nombre",
+            "fecha_inicio": "2026-01-15",
+            "fecha_fin": "2026-04-30",
+            "activo": true
+        }
+    }
+    """
+    try:
+        periodo = Periodo.objects.get(id=periodo_id)
+    except Periodo.DoesNotExist:
+        return Response({'error': 'Periodo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    CAMPOS_EDITABLES = ['nombre', 'fecha_inicio', 'fecha_fin']
+    cambios = {}
+
+    for campo in CAMPOS_EDITABLES:
+        if campo in request.data:
+            valor_anterior = getattr(periodo, campo)
+            cambios[campo] = {
+                'anterior': valor_anterior.isoformat() if hasattr(valor_anterior, 'isoformat') else str(valor_anterior),
+                'nuevo': str(request.data[campo]),
+            }
+            setattr(periodo, campo, request.data[campo])
+
+    if not cambios:
+        return Response({'error': 'No se proporcionaron campos a editar'}, status=status.HTTP_400_BAD_REQUEST)
+
+    periodo.save()
+
+    Auditoria.objects.create(
+        usuario=request.user,
+        accion='EDITAR_PERIODO',
+        entidad='periodo',
+        entidad_id=periodo.id,
+        detalle={'codigo': periodo.codigo, 'cambios': cambios},
+        ip_address=_get_ip(request),
+    )
+
+    return Response({
+        'success': True,
+        'periodo': {
+            'id': periodo.id,
+            'codigo': periodo.codigo,
+            'nombre': periodo.nombre,
+            'fecha_inicio': periodo.fecha_inicio.isoformat() if periodo.fecha_inicio else None,
+            'fecha_fin': periodo.fecha_fin.isoformat() if periodo.fecha_fin else None,
+            'activo': periodo.activo == 1,
+        }
+    }, status=status.HTTP_200_OK)

@@ -42,6 +42,9 @@ from .reports import (
     Reporte,
 )
 
+# Modelo de auditoría
+from .audit import Auditoria
+
 # Exportar todos los modelos
 __all__ = [
     # Base
@@ -71,4 +74,7 @@ __all__ = [
     
     # Reportes
     'Reporte',
+
+    # Auditoría
+    'Auditoria',
 ]
