@@ -87,6 +87,14 @@ from .views.academic.cuestionarios import (
     clasificacion_por_pregunta_view,
 )
 
+# Importar views de exportación (archivos)
+from .views.academic.archivos import (
+    listar_cuestionarios_historico_view,
+    datos_sociograma_view,
+    exportar_csv_view,
+    exportar_pdf_view,
+)
+
 from .views.student.cuestionarios import (
     cuestionarios_disponibles_view,
     detalle_cuestionario_alumno_view,
@@ -228,6 +236,14 @@ urlpatterns = [
     path('academic/cuestionarios/<int:cuestionario_id>/estadisticas/', estadisticas_cuestionario_view, name='estadisticas_cuestionario'),
     path('academic/cuestionarios/<int:cuestionario_id>/registro/', registro_cuestionario_view, name='registro_cuestionario'),
     path('academic/cuestionarios/<int:cuestionario_id>/clasificacion-pregunta/', clasificacion_por_pregunta_view, name='clasificacion_por_pregunta'),
+
+    # ========================================
+    # ACADÉMICO (Tutores) - ARCHIVOS / EXPORTACIÓN
+    # ========================================
+    path('academic/archivos/cuestionarios/', listar_cuestionarios_historico_view, name='archivos_cuestionarios_historico'),
+    path('academic/archivos/cuestionarios/<int:cuestionario_id>/sociograma/', datos_sociograma_view, name='datos_sociograma'),
+    path('academic/archivos/cuestionarios/<int:cuestionario_id>/exportar/csv/', exportar_csv_view, name='exportar_csv'),
+    path('academic/archivos/cuestionarios/<int:cuestionario_id>/exportar/pdf/', exportar_pdf_view, name='exportar_pdf'),
 
     # ========================================
     # ESTUDIANTES - CUESTIONARIOS
