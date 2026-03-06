@@ -141,8 +141,8 @@ def progreso_cuestionario_view(request, cuestionario_id):
                 alumnos_por_grupo[gid] = []
 
             tiempo_transcurrido = None
-            if estado.fecha_inicio and estado.fecha_completado:
-                delta = estado.fecha_completado - estado.fecha_inicio
+            if estado.fecha_inicio and estado.fecha_fin:
+                delta = estado.fecha_fin - estado.fecha_inicio
                 minutos = int(delta.total_seconds() // 60)
                 segundos = int(delta.total_seconds() % 60)
                 tiempo_transcurrido = f"{minutos}m {segundos}s"
@@ -155,7 +155,7 @@ def progreso_cuestionario_view(request, cuestionario_id):
                 'nombre': f"{estado.alumno.user.last_name} {estado.alumno.user.first_name}".strip(),
                 'estado': estado.estado,
                 'fecha_inicio': estado.fecha_inicio,
-                'fecha_completado': estado.fecha_completado,
+                'fecha_fin': estado.fecha_fin,
                 'tiempo_transcurrido': tiempo_transcurrido,
             })
 
@@ -274,7 +274,7 @@ def registro_cuestionario_view(request, cuestionario_id):
                 "nombre": "Juan Pérez López",
                 "estado": "COMPLETADO",
                 "fecha_inicio": "2026-02-10T09:15:00Z",
-                "fecha_completado": "2026-02-10T09:45:00Z",
+                "fecha_fin": "2026-02-10T09:45:00Z",
                 "tiempo_transcurrido": "30m 0s"
             }
         ]
@@ -328,8 +328,8 @@ def registro_cuestionario_view(request, cuestionario_id):
             pendientes += 1
 
         tiempo_transcurrido = None
-        if estado.fecha_inicio and estado.fecha_completado:
-            delta = estado.fecha_completado - estado.fecha_inicio
+        if estado.fecha_inicio and estado.fecha_fin:
+            delta = estado.fecha_fin - estado.fecha_inicio
             minutos = int(delta.total_seconds() // 60)
             segundos = int(delta.total_seconds() % 60)
             tiempo_transcurrido = f"{minutos}m {segundos}s"
@@ -341,7 +341,7 @@ def registro_cuestionario_view(request, cuestionario_id):
             'nombre': f"{estado.alumno.user.last_name} {estado.alumno.user.first_name}".strip(),
             'estado': estado.estado,
             'fecha_inicio': estado.fecha_inicio,
-            'fecha_completado': estado.fecha_completado,
+            'fecha_fin': estado.fecha_fin,
             'tiempo_transcurrido': tiempo_transcurrido,
         })
 
@@ -506,7 +506,7 @@ def clasificacion_por_pregunta_view(request, cuestionario_id):
 
 
 # ============================================
-# FUNCIONES HELPER — SIN N+1
+# FUNCIONES HELPER
 # ============================================
 
 def _calcular_nodos_sociograma(cuestionario, grupo):

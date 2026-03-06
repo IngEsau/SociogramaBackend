@@ -238,7 +238,7 @@ def responder_cuestionario_view(request, cuestionario_id):
             'error': 'Ya completaste este cuestionario',
             'message': 'No puedes volver a responder un cuestionario completado',
             'progreso': float(estado.progreso),
-            'fecha_completado': estado.fecha_completado
+            'fecha_fin': estado.fecha_fin
         }, status=status.HTTP_400_BAD_REQUEST)
 
     respuestas_data = request.data.get('respuestas', [])
@@ -407,6 +407,65 @@ def responder_cuestionario_view(request, cuestionario_id):
     }, status=status.HTTP_201_CREATED)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@require_alumno
+def iniciar_cuestionario_view(request, cuestionario_id):
+    """
+    Registra el inicio de un cuestionario para el alumno.
+    Crea el CuestionarioEstado si no existe y guarda fecha_inicio.
+    POST /api/student/cuestionarios/{id}/iniciar/
+    """
+    alumno = request.alumno
+    cuestionario = get_object_or_404(
+        Cuestionario.objects.select_related('periodo'),
+        id=cuestionario_id
+    )
+
+    if not cuestionario.periodo.activo:
+        return Response({'error': 'El periodo de este cuestionario no esta activo'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not cuestionario.esta_activo:
+        return Response({'error': 'Este cuestionario no esta disponible en este momento'}, status=status.HTTP_400_BAD_REQUEST)
+
+    alumno_grupo = AlumnoGrupo.objects.filter(
+        alumno=alumno,
+        grupo__periodo=cuestionario.periodo,
+        activo=True
+    ).select_related('grupo').first()
+
+    if not alumno_grupo:
+        return Response({'error': 'No tienes acceso a este cuestionario'}, status=status.HTTP_403_FORBIDDEN)
+
+    estado, creado = CuestionarioEstado.objects.get_or_create(
+        cuestionario=cuestionario,
+        alumno=alumno,
+        grupo=alumno_grupo.grupo,
+        defaults={'estado': 'EN_PROGRESO', 'fecha_inicio': timezone.now()}
+    )
+
+    if estado.estado == 'COMPLETADO':
+        return Response({
+            'error': 'Ya completaste este cuestionario',
+            'progreso': float(estado.progreso),
+            'fecha_fin': estado.fecha_fin
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    # Si ya existía pero no tenía fecha_inicio, la asignamos ahora
+    if not creado and not estado.fecha_inicio:
+        estado.fecha_inicio = timezone.now()
+        estado.estado = 'EN_PROGRESO'
+        estado.save(update_fields=['fecha_inicio', 'estado'])
+
+    return Response({
+        'cuestionario_id': cuestionario.id,
+        'estado': estado.estado,
+        'progreso': float(estado.progreso),
+        'fecha_inicio': estado.fecha_inicio,
+        'creado': creado
+    }, status=status.HTTP_200_OK)
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 @require_alumno
@@ -452,5 +511,5 @@ def mi_progreso_view(request, cuestionario_id):
         'progreso': float(estado.progreso),
         'estado': estado.estado,
         'fecha_inicio': estado.fecha_inicio,
-        'fecha_completado': estado.fecha_completado
+        'fecha_fin': estado.fecha_fin
     }, status=status.HTTP_200_OK)
