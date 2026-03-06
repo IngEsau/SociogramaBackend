@@ -89,9 +89,9 @@ class CuestionarioEstadoSerializer(serializers.ModelSerializer):
             'id', 'cuestionario', 'cuestionario_titulo', 
             'alumno', 'alumno_matricula', 'alumno_nombre',
             'grupo', 'grupo_clave',
-            'estado', 'progreso', 'fecha_inicio', 'fecha_completado'
+            'estado', 'progreso', 'fecha_inicio', 'fecha_fin'
         ]
-        read_only_fields = ['id', 'progreso', 'fecha_inicio', 'fecha_completado']
+        read_only_fields = ['id', 'progreso', 'fecha_inicio', 'fecha_fin']
 
 
 # ============================================
@@ -357,4 +357,4 @@ class ProgresoAlumnoSerializer(serializers.Serializer):
     progreso = serializers.DecimalField(max_digits=5, decimal_places=2)
     estado = serializers.CharField()
     fecha_inicio = serializers.DateTimeField(allow_null=True)
-    fecha_completado = serializers.DateTimeField(allow_null=True)
+    fecha_fin = serializers.DateTimeField(allow_null=True)

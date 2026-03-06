@@ -99,6 +99,7 @@ from .views.student.cuestionarios import (
     cuestionarios_disponibles_view,
     detalle_cuestionario_alumno_view,
     preguntas_cuestionario_view,
+    iniciar_cuestionario_view,
     responder_cuestionario_view,
     mi_progreso_view,
 )
@@ -251,6 +252,7 @@ urlpatterns = [
     path('student/cuestionarios/disponibles/', cuestionarios_disponibles_view, name='cuestionarios_disponibles'),
     path('student/cuestionarios/<int:cuestionario_id>/', detalle_cuestionario_alumno_view, name='detalle_cuestionario_alumno'),
     path('student/cuestionarios/<int:cuestionario_id>/preguntas/', preguntas_cuestionario_view, name='preguntas_cuestionario'),
+    path('student/cuestionarios/<int:cuestionario_id>/iniciar/', iniciar_cuestionario_view, name='iniciar_cuestionario'),
     path('student/cuestionarios/<int:cuestionario_id>/responder/', responder_cuestionario_view, name='responder_cuestionario'),
     path('student/cuestionarios/<int:cuestionario_id>/mi-progreso/', mi_progreso_view, name='mi_progreso'),
 

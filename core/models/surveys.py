@@ -187,7 +187,7 @@ class CuestionarioEstado(models.Model):
     )
     estado = models.CharField(max_length=20, choices=ESTADOS, default='PENDIENTE')
     fecha_inicio = models.DateTimeField(null=True, blank=True)
-    fecha_completado = models.DateTimeField(null=True, blank=True)
+    fecha_fin = models.DateTimeField(null=True, blank=True)
     progreso = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
     
     class Meta:
@@ -220,8 +220,8 @@ class CuestionarioEstado(models.Model):
             self.estado = 'COMPLETADO'
             if not self.fecha_inicio:
                 self.fecha_inicio = timezone.now()
-            if not self.fecha_completado:
-                self.fecha_completado = timezone.now()
+            if not self.fecha_fin:
+                self.fecha_fin = timezone.now()
 
         else:
             self.estado = 'EN_PROGRESO'
