@@ -25,22 +25,40 @@ from core.utils.decorators import require_tutor
 @require_tutor
 def listar_cuestionarios_tutor_view(request):
     """
-    Lista cuestionarios activos del periodo actual
+    Lista cuestionarios del tutor: el activo si existe, si no el último que fue activado.
     GET /api/academic/cuestionarios/
     """
-    grupos_tutor = Grupo.objects.filter(
-        tutor=request.docente,
-        activo=True,
-        periodo__activo=True
+    periodos_tutor = Grupo.objects.filter(
+        tutor=request.docente
     ).values_list('periodo_id', flat=True).distinct()
-    
+
+    # Primero buscar si hay uno activo
     cuestionarios = Cuestionario.objects.filter(
-        periodo_id__in=grupos_tutor,
+        periodo_id__in=periodos_tutor,
         activo=True
     ).select_related('periodo').order_by('-creado_en')
-    
+
+    # Si no hay activo, mostrar el último que fue activado (tiene CuestionarioEstado)
+    if not cuestionarios.exists():
+        ultimo_id = (
+            CuestionarioEstado.objects
+            .filter(
+                cuestionario__periodo_id__in=periodos_tutor,
+                grupo__tutor=request.docente
+            )
+            .order_by('-cuestionario__fecha_inicio', '-cuestionario__creado_en')
+            .values_list('cuestionario_id', flat=True)
+            .first()
+        )
+        if ultimo_id:
+            cuestionarios = Cuestionario.objects.filter(
+                id=ultimo_id
+            ).select_related('periodo')
+        else:
+            cuestionarios = Cuestionario.objects.none()
+
     serializer = CuestionarioListSerializer(cuestionarios, many=True)
-    
+
     return Response({
         'cuestionarios': serializer.data
     }, status=status.HTTP_200_OK)
@@ -62,7 +80,6 @@ def detalle_cuestionario_tutor_view(request, cuestionario_id):
     tiene_acceso = Grupo.objects.filter(
         tutor=request.docente,
         periodo=cuestionario.periodo,
-        activo=True
     ).exists()
     
     if not tiene_acceso:
@@ -93,7 +110,6 @@ def progreso_cuestionario_view(request, cuestionario_id):
     grupos_tutor = Grupo.objects.filter(
         tutor=request.docente,
         periodo=cuestionario.periodo,
-        activo=True
     ).select_related('periodo')
 
     if not grupos_tutor.exists():
@@ -208,7 +224,6 @@ def estadisticas_cuestionario_view(request, cuestionario_id):
     grupos_query = Grupo.objects.filter(
         tutor=request.docente,
         periodo=cuestionario.periodo,
-        activo=True
     )
     
     if grupo_id:
@@ -294,7 +309,6 @@ def registro_cuestionario_view(request, cuestionario_id):
         id=grupo_id,
         tutor=request.docente,
         periodo=cuestionario.periodo,
-        activo=True
     ).first()
 
     if not grupo:
@@ -419,7 +433,6 @@ def clasificacion_por_pregunta_view(request, cuestionario_id):
         id=grupo_id,
         tutor=request.docente,
         periodo=cuestionario.periodo,
-        activo=True
     ).first()
 
     if not grupo:
