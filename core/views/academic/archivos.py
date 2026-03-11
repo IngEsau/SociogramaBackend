@@ -1,9 +1,8 @@
 # core/views/academic/archivos.py
 """
-Endpoints para exportación de datos del sociograma (CSV, PDF).
+Endpoints para exportación de datos del sociograma (CSV, PDF, PNG).
 El tutor puede acceder a cualquier grupo donde sea o haya sido tutor,
 sin importar si el periodo está activo o no.
-Para los datos del sociograma (JPG) el front usa /api/academic/cuestionarios/{id}/estadisticas/
 """
 import csv
 import io
@@ -19,7 +18,8 @@ from rest_framework.permissions import IsAuthenticated
 
 from core.models import Cuestionario, CuestionarioEstado, Grupo
 from core.utils.decorators import require_tutor
-from .cuestionarios import _calcular_nodos_sociograma, _calcular_conexiones_sociograma  # para CSV y PDF
+from core.utils.sociogram_renderer import render_sociogram_svg
+from .cuestionarios import _calcular_nodos_sociograma, _calcular_conexiones_sociograma  # para CSV, PDF y PNG
 
 
 def _get_grupo_tutor(docente, grupo_id):
@@ -282,7 +282,7 @@ def exportar_pdf_view(request, cuestionario_id):
         from reportlab.lib.units import cm
         from reportlab.lib.enums import TA_CENTER
         from reportlab.platypus import (
-            SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
+            SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak,
         )
     except ImportError:
         return Response(
@@ -358,7 +358,22 @@ def exportar_pdf_view(request, cuestionario_id):
         f"Completaron: {nodos_data['respuestas_completas']}",
         meta_style,
     ))
-    elements.append(Spacer(1, 0.4 * cm))
+    elements.append(Spacer(1, 0.3 * cm))
+
+    # --- Imagen del sociograma (requiere cairosvg) ---
+    try:
+        import cairosvg
+        svg_str = render_sociogram_svg(nodos_data['nodos'], conexiones_data)
+        png_bytes = cairosvg.svg2png(bytestring=svg_str.encode('utf-8'), scale=1)
+        img_buffer = io.BytesIO(png_bytes)
+        # 20cm ancho × proporcional (980:700) → ~14.3cm alto
+        # Encabezado (~2cm) + imagen (~14.3cm) + espaciado (~0.3cm) ≈ 16.6cm < 18cm útiles en A4 landscape
+        img_w = 20 * cm
+        img_h = img_w * (700 / 980)
+        elements.append(Image(img_buffer, width=img_w, height=img_h))
+        elements.append(PageBreak())
+    except (ImportError, OSError):
+        pass  # Sin Cairo: el PDF se genera igualmente sin la imagen
 
     # --- Tabla de nodos ---
     elements.append(Paragraph("Nodos (Alumnos)", section_style))
@@ -382,7 +397,7 @@ def exportar_pdf_view(request, cuestionario_id):
             'Sí' if nodo['completo'] else 'No',
         ])
 
-    col_widths_nodos = [1*cm, 2.5*cm, 5*cm, 2.8*cm, 1.4*cm, 1.4*cm, 1.8*cm, 1.8*cm, 1.8*cm, 1.8*cm]
+    col_widths_nodos = [0.8*cm, 2.2*cm, 8*cm, 2.5*cm, 1.2*cm, 1.2*cm, 1.5*cm, 1.7*cm, 1.7*cm, 1.4*cm]
     tabla_nodos = Table(rows_nodos, colWidths=col_widths_nodos, repeatRows=1)
 
     style_nodos = TableStyle([
@@ -423,7 +438,7 @@ def exportar_pdf_view(request, cuestionario_id):
                 f"{conn['porcentaje_mutuo']}%",
             ])
 
-        col_widths_conn = [4.5*cm, 4.5*cm, 1.4*cm, 2*cm, 1.4*cm, 2.5*cm, 2*cm]
+        col_widths_conn = [6.5*cm, 6.5*cm, 1.5*cm, 2*cm, 1.4*cm, 2.5*cm, 1.8*cm]
         tabla_conn = Table(rows_conn, colWidths=col_widths_conn, repeatRows=1)
         tabla_conn.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), VERDE_OSCURO),
@@ -445,5 +460,59 @@ def exportar_pdf_view(request, cuestionario_id):
 
     filename = f"sociograma_{grupo.clave}_{cuestionario.id}.pdf".replace(' ', '_')
     response = HttpResponse(buffer, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+@require_tutor
+def exportar_imagen_view(request, cuestionario_id):
+    """
+    Exporta el sociograma como imagen PNG (descarga directa).
+    GET /api/academic/archivos/cuestionarios/{id}/exportar/imagen/?grupo_id={id}
+
+    Requiere: cairosvg (pip install cairosvg)
+    """
+    try:
+        import cairosvg
+    except (ImportError, OSError):
+        return Response(
+            {'error': 'Librería cairosvg no disponible o Cairo no está instalado en el sistema.'},
+            status=status.HTTP_501_NOT_IMPLEMENTED,
+        )
+
+    cuestionario = get_object_or_404(Cuestionario, id=cuestionario_id)
+    grupo_id = request.query_params.get('grupo_id')
+
+    if not grupo_id:
+        return Response(
+            {'error': 'El parámetro grupo_id es requerido'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    grupo = _get_grupo_tutor(request.docente, grupo_id)
+    if not grupo:
+        return Response(
+            {'error': 'No tienes acceso a este grupo'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if not CuestionarioEstado.objects.filter(cuestionario=cuestionario, grupo=grupo).exists():
+        return Response(
+            {'error': 'No hay datos de este cuestionario para el grupo indicado'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    nodos_data = _calcular_nodos_sociograma(cuestionario, grupo)
+    conexiones_data = _calcular_conexiones_sociograma(cuestionario, grupo)
+
+    svg_str = render_sociogram_svg(nodos_data['nodos'], conexiones_data)
+
+    # scale=2 → imagen de 1960×1400 px (calidad suficiente para imprimir)
+    png_bytes = cairosvg.svg2png(bytestring=svg_str.encode('utf-8'), scale=2)
+
+    filename = f"sociograma_{grupo.clave}_{cuestionario.id}.png".replace(' ', '_')
+    response = HttpResponse(png_bytes, content_type='image/png')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
