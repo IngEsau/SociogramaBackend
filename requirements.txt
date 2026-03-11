@@ -6,3 +6,4 @@ django-cors-headers==4.3.1
 python-dotenv==1.0.0
 pandas
 reportlab
+cairosvg>=2.7.0

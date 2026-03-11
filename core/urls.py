@@ -93,6 +93,7 @@ from .views.academic.archivos import (
     datos_sociograma_view,
     exportar_csv_view,
     exportar_pdf_view,
+    exportar_imagen_view,
 )
 
 from .views.student.cuestionarios import (
@@ -245,6 +246,7 @@ urlpatterns = [
     path('academic/archivos/cuestionarios/<int:cuestionario_id>/sociograma/', datos_sociograma_view, name='datos_sociograma'),
     path('academic/archivos/cuestionarios/<int:cuestionario_id>/exportar/csv/', exportar_csv_view, name='exportar_csv'),
     path('academic/archivos/cuestionarios/<int:cuestionario_id>/exportar/pdf/', exportar_pdf_view, name='exportar_pdf'),
+    path('academic/archivos/cuestionarios/<int:cuestionario_id>/exportar/imagen/', exportar_imagen_view, name='exportar_imagen'),
 
     # ========================================
     # ESTUDIANTES - CUESTIONARIOS
